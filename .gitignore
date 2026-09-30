@@ -1,0 +1,29 @@
+# Build output
+/out/
+/dist/
+*.class
+
+# Compiled game archive (built by build.bat/build.sh; not the source of truth)
+Mingeriacc.jar
+Mingeriacc-exe/
+
+# Packaged Windows exe (from make_exe.bat)
+*.exe
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+out/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local game data if it ever ends up next to the source
+error.log
+settings.properties
+/worlds/
