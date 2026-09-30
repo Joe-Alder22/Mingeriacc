@@ -2,6 +2,7 @@
 
 A 2D Mine clone of a clone, AI generated in Java for my personal amusement.
 
+<img width="2560" height="1392" alt="image_v03" src="https://github.com/user-attachments/assets/ddd5163d-d4b0-413a-96b9-ec4016a983d0" />
 
 ## How to play
 
