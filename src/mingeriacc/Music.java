@@ -11,8 +11,9 @@ import java.util.Random;
  * repeats from sounding identical.
  */
 final class Music {
-    static final int NONE = 0, DAY = 1, NIGHT = 2, CAVE = 3, TITLE = 4, JUNGLE = 5, CORRUPTION = 6, UNDERWORLD = 7;
-    static final int SONGS = 8;
+    static final int NONE = 0, DAY = 1, NIGHT = 2, CAVE = 3, TITLE = 4, JUNGLE = 5, CORRUPTION = 6, UNDERWORLD = 7,
+            SNOW = 8, BOSS = 9, BLOOD_MOON = 10;
+    static final int SONGS = 11;
 
     // track kinds
     private static final int MELODY = 0, ARP = 1, PAD = 2, BASS = 3, DRUM = 4, SPARKLE = 5;
@@ -45,6 +46,7 @@ final class Music {
         List<Track> tracks = new ArrayList<>();
         int echoTime = Synth.RATE / 3;
         double reverb = 0.8;
+        double volume = 1;         // evens out the loudness of the songs
     }
 
     private final Song[] songs = new Song[SONGS];
@@ -62,6 +64,115 @@ final class Music {
         songs[JUNGLE] = jungle();
         songs[CORRUPTION] = corruption();
         songs[UNDERWORLD] = underworld();
+        songs[SNOW] = snow();
+        songs[BOSS] = boss();
+        songs[BLOOD_MOON] = bloodMoon();
+    }
+
+    /** Snow: a music box, harp and flute over soft pads. */
+    private static Song snow() {
+        Song s = new Song();
+        s.bpm = 72;
+        s.chords = chords("Amaj7 Amaj7 F#m7 E "
+                + "A E/G# F#m7 Dmaj7 A/C# Bm7 Esus4 E "
+                + "Dmaj7 E C#m7 F#m7 Bm7 E Amaj7 F#m7 "
+                + "Dmaj7 E Asus2 A");
+        Track box = track(s, ARP, Synth.BELL, 0.16, 0.25, 0.6, all(24));
+        box.octave = 64;
+        box.pattern = "4 2 3 1 4 2 3 5";
+        Track harp = track(s, ARP, Synth.HARP, 0.24, -0.25, 0.5, "...." + "XXXXXXXX" + "XXXXXXXX" + "XXXX");
+        harp.octave = 45;
+        harp.pattern = "0 2 4 2 3 2 4 2";
+        Track pad = track(s, PAD, Synth.PAD, 0.14, -0.1, 0.6, all(24));
+        pad.octave = 55;
+        Track bass = track(s, BASS, Synth.BASS, 0.26, 0, 0.2, "...." + "XXXXXXXX" + "XXXXXXXX" + "XXX.");
+        bass.octave = 33;
+        bass.pattern = "R.......R.......";
+        Track flute = track(s, MELODY, Synth.FLUTE, 0.27, 0.15, 0.5, "...." + "XXXXXXXX" + "........" + "....");
+        melody(flute, 4, "E5:6 C#5:2 A4:8 | B4:4 E5:4 G#5:8 | A5:6 F#5:2 C#5:8 | D5:4 F#5:4 A5:8 | "
+                + "E5:6 A5:2 C#6:8 | B5:4 A5:4 F#5:8 | E5:4 F#5:4 A5:4 B5:4 | G#5:12 r:4");
+        Track piano = track(s, MELODY, Synth.EPIANO, 0.3, -0.1, 0.55, "............" + "XXXXXXXX" + "....");
+        melody(piano, 12, "F#5:4 A5:4 C#6:8 | B5:4 G#5:4 E5:8 | E5:4 G#5:4 B5:6 C#6:2 | A5:6 F#5:2 C#5:8 | "
+                + "D5:4 F#5:4 B5:8 | G#5:6 B5:2 E6:8 | C#6:4 E6:4 G#5:8 | A5:12 r:4");
+        Track bells = track(s, MELODY, Synth.BELL, 0.2, 0.2, 0.7, all(24));
+        melody(bells, 20, "A6:8 F#6:8 | G#6:8 E6:8 | E6:16 | C#6:12 r:4");
+        Track strings = track(s, PAD, Synth.STRINGS, 0.1, 0.1, 0.7, "............" + "XXXXXXXX" + "XXXX");
+        strings.octave = 64;
+        Track shaker = track(s, DRUM, 0, 0.14, 0.3, 0.4, "...." + "....XXXX" + "XXXXXXXX" + "....");
+        shaker.pattern = "....h.......h...";
+        Track spark = track(s, SPARKLE, Synth.BELL, 0.1, 0, 0.85, all(24));
+        spark.octave = 88;
+        spark.chance = 0.12;
+        spark.echo = 0.4;
+        s.echoTime = (int) (Synth.RATE * 60.0 / s.bpm * 0.75);
+        s.reverb = 0.9;
+        s.volume = 0.75;
+        return s;
+    }
+
+    /** Boss fights: a driving bass and string ostinato, drums and a choir. */
+    private static Song boss() {
+        Song s = new Song();
+        s.bpm = 128;
+        s.chords = chords("Dm Dm Bb C Dm Dm Gm A Dm Bb F C Gm Bb A A");
+        Track bass = track(s, BASS, Synth.PLUCK_BASS, 0.42, 0, 0.15, all(16));
+        bass.octave = 26;
+        bass.pattern = "R.R.R.R.R.R.R.RO";
+        Track ost = track(s, ARP, Synth.PLUCK, 0.22, 0.25, 0.2, all(16));
+        ost.octave = 50;
+        ost.stepDiv = 4;
+        ost.pattern = "0 1 2 1";
+        Track choir = track(s, PAD, Synth.CHOIR, 0.2, -0.15, 0.55, all(16));
+        choir.octave = 50;
+        Track strings = track(s, MELODY, Synth.STRINGS, 0.34, -0.1, 0.4, "...." + "XXXXXXXX" + "XXXX");
+        melody(strings, 4, "D5:4 F5:4 A5:6 G5:2 | F5:4 E5:4 D5:8 | G5:4 Bb5:4 D6:6 C6:2 | C#6:8 A5:8 | "
+                + "A5:4 D6:4 F6:6 E6:2 | D6:4 Bb5:4 F5:8 | A5:4 C6:4 F6:8 | E6:6 D6:2 C6:8 | "
+                + "Bb5:4 D6:4 G6:8 | F6:6 D6:2 Bb5:8 | A5:4 C#6:4 E6:8 | A5:16");
+        Track bells = track(s, MELODY, Synth.BELL, 0.22, 0.2, 0.5, all(16));
+        melody(bells, 0, "D6:8 A5:8 | D6:8 F6:8 | Bb5:8 D6:8 | C6:16");
+        Track tom = track(s, DRUM, 0, 0.42, -0.25, 0.3, all(16));
+        tom.pattern = "t.t.t..tt.t.t..t";
+        Track boom = track(s, DRUM, 0, 0.5, 0, 0.4, all(16));
+        boom.pattern = "b.......b...b...";
+        Track rim = track(s, DRUM, 0, 0.2, 0.3, 0.25, "...." + "XXXXXXXX" + "XXXX");
+        rim.pattern = "....r.......r..r";
+        Track shaker = track(s, DRUM, 0, 0.14, 0.35, 0.2, all(16));
+        shaker.pattern = "h.h.H.h.h.h.H.h.";
+        s.echoTime = (int) (Synth.RATE * 60.0 / s.bpm * 0.5);
+        s.reverb = 0.75;
+        s.volume = 0.78;
+        return s;
+    }
+
+    /** The blood moon: a slow heartbeat under a dark choir. */
+    private static Song bloodMoon() {
+        Song s = new Song();
+        s.bpm = 58;
+        s.chords = chords("Em Em F Em Em C B B Em Em F Em Am C B B");
+        Track choir = track(s, PAD, Synth.CHOIR, 0.22, 0, 0.75, all(16));
+        choir.octave = 50;
+        Track low = track(s, PAD, Synth.STRINGS, 0.13, -0.2, 0.6, "..XX" + "XXXXXXXX" + "XXXX");
+        low.octave = 40;
+        Track bass = track(s, BASS, Synth.BASS, 0.3, 0, 0.3, all(16));
+        bass.octave = 28;
+        bass.pattern = "R.......R.......";
+        Track heart = track(s, DRUM, 0, 0.5, 0, 0.3, "..XX" + "XXXXXXXX" + "XXXX");
+        heart.pattern = "k..k............";
+        Track piano = track(s, MELODY, Synth.EPIANO, 0.3, 0.15, 0.7, "...." + "XXXXXXXX" + "XXXX");
+        piano.echo = 0.4;
+        melody(piano, 4, "G5:6 E5:2 B4:8 | C5:4 E5:4 G5:8 | F#5:8 D#5:8 | B4:16 | "
+                + "E5:4 G5:4 B5:8 | A5:6 G5:2 E5:8 | F5:8 C5:8 | E5:16 | "
+                + "A5:6 C6:2 E6:8 | G5:4 E5:4 C5:8 | D#5:6 F#5:2 B5:8 | B4:16");
+        Track tom = track(s, DRUM, 0, 0.3, -0.3, 0.5, "........" + "XXXXXXXX");
+        tom.pattern = "t...............";
+        Track spark = track(s, SPARKLE, Synth.BELL, 0.1, 0, 0.9, all(16));
+        spark.octave = 84;
+        spark.chance = 0.08;
+        spark.echo = 0.5;
+        s.echoTime = (int) (Synth.RATE * 60.0 / s.bpm * 0.75);
+        s.reverb = 0.92;
+        s.volume = 0.75;
+        return s;
     }
 
     private static Song jungle() {
@@ -421,7 +532,7 @@ final class Music {
             long len = (long) lenSteps * stepSamples() - stepSamples() / 6;
             long delay = tr.kind == MELODY || tr.kind == PAD ? rnd.nextInt(120) : rnd.nextInt(300);
             double f = inst >= Synth.KICK && inst <= Synth.BOOM && inst != Synth.TOM ? 1 : Synth.midiFreq(midi);
-            v.start(inst, f, vel * tr.gain, Math.max(-1, Math.min(1, tr.pan + panOffset)), Math.max(1, len), delay,
+            v.start(inst, f, vel * tr.gain * song.volume, Math.max(-1, Math.min(1, tr.pan + panOffset)), Math.max(1, len), delay,
                     rnd.nextInt());
             v.rev = tr.rev;
             v.echo = tr.echo;

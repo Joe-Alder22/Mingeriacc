@@ -21,14 +21,17 @@ final class Tiles {
             EBON_TRUNK = 38, EBON_LEAVES = 39, VINE = 40, JUNGLE_PLANT = 41, CORRUPT_PLANT = 42,
             JUNGLE_SPORE = 43, MAHOGANY_PLANKS = 44, EBON_PLANKS = 45, CHEST = 46, DOOR_CLOSED = 47,
             DOOR_OPEN = 48, TABLE = 49, CHAIR = 50, BED = 51, OBSIDIAN_BRICK = 52, HELLSTONE_BRICK = 53,
-            GOLD_CHEST = 54;
-    static final int COUNT = 55;
+            GOLD_CHEST = 54,
+            RUBY = 55, SAPPHIRE = 56, EMERALD = 57, TOPAZ = 58,
+            GREEN_MOSS = 59, BROWN_MOSS = 60, RED_MOSS = 61, BLUE_MOSS = 62, PURPLE_MOSS = 63, MOSS_PLANT = 64,
+            SNOW = 65, ICE = 66, BOREAL_TRUNK = 67, BOREAL_LEAVES = 68, BOREAL_PLANKS = 69, ICE_CHEST = 70;
+    static final int COUNT = 71;
 
     // Walls (the _N walls are natural ones made by world generation: enemies may spawn on them)
     static final int W_NONE = 0, W_DIRT = 1, W_STONE = 2, W_WOOD = 3, W_DIRT_N = 4, W_STONE_N = 5,
             W_GLASS = 6, W_GRAY_BRICK = 7, W_RED_BRICK = 8, W_MUD_N = 9, W_EBON_N = 10, W_MAHOGANY = 11,
-            W_OBSIDIAN_BRICK = 12, W_HELLSTONE_BRICK = 13;
-    static final int WALL_COUNT = 14;
+            W_OBSIDIAN_BRICK = 12, W_HELLSTONE_BRICK = 13, W_SNOW_N = 14, W_ICE_N = 15, W_BOREAL = 16;
+    static final int WALL_COUNT = 17;
 
     // Tool types
     static final int TOOL_NONE = 0, TOOL_PICK = 1, TOOL_AXE = 2, TOOL_HAMMER = 3;
@@ -53,6 +56,8 @@ final class Tiles {
     static final boolean[] BLEED_SRC = new boolean[COUNT];    // soft ground that bleeds into neighbours
     static final boolean[] BLEED_DST = new boolean[COUNT];    // hard ground that soft ground bleeds into
     static final boolean[] PLACE_OVER = new boolean[COUNT];   // can be replaced by placing a tile
+    /** Moss colours (highlight, light, mid, dark) for moss-covered stone, else null. */
+    static final int[][] MOSS = new int[COUNT][];
 
     // Furniture: tiles made of several cells. The meta byte of each cell holds
     // its offset inside the object: dx | dy << 3 | flags << 6.
@@ -71,10 +76,11 @@ final class Tiles {
     static Sprite[][] furn = new Sprite[COUNT][];    // whole-object images (animation frames)
     static Sprite[][] furnGlow = new Sprite[COUNT][]; // parts that glow (drawn unlit)
     static Sprite[][] wallTex = new Sprite[WALL_COUNT][];
-    static Sprite[] caveBack = new Sprite[4];        // parallax cave backdrops (dirt, stone, jungle, corruption)
+    static Sprite[] caveBack = new Sprite[5];        // parallax cave backdrops (dirt, stone, jungle, corruption, snow)
     static Sprite[][] torchFlame;
     static Sprite torchStick;
-    static Sprite[] trunkBase, trunkBaseMaho, trunkBaseEbon;
+    static Sprite[] trunkBase, trunkBaseMaho, trunkBaseEbon, trunkBaseBoreal;
+    static Sprite[][] mossPlant = new Sprite[5][];   // moss tufts in each moss colour
     static Sprite[] cracks;
 
     private static void def(int id, String name, boolean solid, int hp, int tool, int drop,
@@ -163,6 +169,28 @@ final class Tiles {
         def(OBSIDIAN_BRICK, "Obsidian Brick", true, 200, TOOL_PICK, Items.OBSIDIAN_BRICK, Pal.OBS, 0x0a0612, SND_HARD);
         def(HELLSTONE_BRICK, "Hellstone Brick", true, 150, TOOL_PICK, Items.HELLSTONE_BRICK, Pal.HELL_D, 0x2a0e08, SND_HARD);
         def(GOLD_CHEST, "Gold Chest", false, 60, TOOL_PICK, Items.GOLD_CHEST, Pal.GOLD, 0, SND_METAL);
+        // version 0.4: gems, moss, snow
+        def(RUBY, "Ruby", true, 120, TOOL_PICK, Items.RUBY, Pal.RUBY, 0x2e2e38, SND_GLASS);
+        def(SAPPHIRE, "Sapphire", true, 120, TOOL_PICK, Items.SAPPHIRE, Pal.SAPPHIRE, 0x2e2e38, SND_GLASS);
+        def(EMERALD, "Emerald", true, 120, TOOL_PICK, Items.EMERALD, Pal.EMERALD, 0x2e2e38, SND_GLASS);
+        def(TOPAZ, "Topaz", true, 120, TOOL_PICK, Items.TOPAZ, Pal.TOPAZ, 0x2e2e38, SND_GLASS);
+        String[] mossNames = {"Green Moss", "Brown Moss", "Red Moss", "Blue Moss", "Purple Moss"};
+        int[][] mossRamps = {
+            {0x9af070, 0x6ac848, 0x46a034, 0x2a7024}, {0xd8b070, 0xb08848, 0x8a6434, 0x5e4024},
+            {0xff8a7a, 0xe05048, 0xb03034, 0x7a1a24}, {0x9ad8ff, 0x5aa8f0, 0x3a78d0, 0x24509a},
+            {0xe0a0ff, 0xb070f0, 0x8a48d0, 0x5a2a9a}};
+        for (int k = 0; k < 5; k++) {
+            int t = GREEN_MOSS + k;
+            def(t, mossNames[k], true, 80, TOOL_PICK, Items.STONE, mossRamps[k][2], 0x2e2e38, SND_HARD);
+            MOSS[t] = mossRamps[k];
+        }
+        def(MOSS_PLANT, "Moss", false, 1, TOOL_NONE, 0, 0x6ac848, 0, SND_PLANT);
+        def(SNOW, "Snow", true, 35, TOOL_PICK, Items.SNOW_BLOCK, Pal.SNOW, 0x8a9ab8, SND_SOFT);
+        def(ICE, "Ice", true, 60, TOOL_PICK, Items.ICE_BLOCK, Pal.ICE, 0x4a7aa8, SND_GLASS);
+        def(BOREAL_TRUNK, "Boreal Tree", false, 110, TOOL_AXE, Items.BOREAL_WOOD, Pal.BOREAL, 0, SND_WOOD);
+        def(BOREAL_LEAVES, "Leaves", false, 1, TOOL_NONE, 0, 0x2a5a4a, 0, SND_PLANT);
+        def(BOREAL_PLANKS, "Boreal Planks", true, 50, TOOL_PICK, Items.BOREAL_WOOD, Pal.BOREAL_L, 0x3e3226, SND_WOOD);
+        def(ICE_CHEST, "Frozen Chest", false, 50, TOOL_PICK, Items.ICE_CHEST, Pal.ICE, 0, SND_GLASS);
         MIN_PICK[EBONSTONE] = 45;
         MIN_PICK[DEMONITE] = 55;
         MIN_PICK[OBSIDIAN] = 55;
@@ -183,6 +211,9 @@ final class Tiles {
         NEEDS_GROUND[JUNGLE_PLANT] = true;
         NEEDS_GROUND[CORRUPT_PLANT] = true;
         NEEDS_GROUND[JUNGLE_SPORE] = true;
+        FRAGILE[MOSS_PLANT] = true;
+        NEEDS_GROUND[MOSS_PLANT] = true;
+        PLACE_OVER[MOSS_PLANT] = true;
         TRANSPARENT[GLASS] = true;
         PLACE_OVER[JUNGLE_PLANT] = true;
         PLACE_OVER[CORRUPT_PLANT] = true;
@@ -196,9 +227,14 @@ final class Tiles {
         light(HELLSTONE, 7, 0xff5a20);
         light(JUNGLE_SPORE, 6, 0x9aff70);
         light(DEMONITE, 4, 0x9a70ff);
+        light(RUBY, 4, 0xff5a6a);
+        light(SAPPHIRE, 4, 0x5a8aff);
+        light(EMERALD, 4, 0x5aff8a);
+        light(TOPAZ, 4, 0xffc84a);
 
         furniture(CHEST, 2, 2);
         furniture(GOLD_CHEST, 2, 2);
+        furniture(ICE_CHEST, 2, 2);
         furniture(DOOR_CLOSED, 1, 3);
         furniture(DOOR_OPEN, 2, 3);
         furniture(TABLE, 3, 2);
@@ -213,8 +249,9 @@ final class Tiles {
         PLAT_TOP[WORKBENCH] = true;
         PLAT_TOP[ANVIL] = true;
 
-        for (int t : new int[]{DIRT, GRASS, MUD, JUNGLE_GRASS, CORRUPT_GRASS, ASH}) BLEED_SRC[t] = true;
-        for (int t : new int[]{STONE, COPPER, IRON, SILVER, GOLD, CLAY, SAND, EBONSTONE, DEMONITE, HELLSTONE, EBONSAND})
+        for (int t : new int[]{DIRT, GRASS, MUD, JUNGLE_GRASS, CORRUPT_GRASS, ASH, SNOW}) BLEED_SRC[t] = true;
+        for (int t : new int[]{STONE, COPPER, IRON, SILVER, GOLD, CLAY, SAND, EBONSTONE, DEMONITE, HELLSTONE, EBONSAND,
+                RUBY, SAPPHIRE, EMERALD, TOPAZ, ICE, GREEN_MOSS, BROWN_MOSS, RED_MOSS, BLUE_MOSS, PURPLE_MOSS})
             BLEED_DST[t] = true;
 
         wall(W_NONE, "", 0, 0, 0, false);
@@ -231,6 +268,9 @@ final class Tiles {
         wall(W_MAHOGANY, "Rich Mahogany Wall", 30, Items.MAHOGANY_WALL, Pal.MAHO_D, false);
         wall(W_OBSIDIAN_BRICK, "Obsidian Brick Wall", 60, Items.OBSIDIAN_BRICK_WALL, Pal.OBS_D, false);
         wall(W_HELLSTONE_BRICK, "Hellstone Brick Wall", 60, Items.HELLSTONE_BRICK_WALL, Pal.HELL_D, false);
+        wall(W_SNOW_N, "Snow Wall", 30, 0, 0x8a98b4, true);
+        wall(W_ICE_N, "Ice Wall", 40, 0, 0x5a7aa0, true);
+        wall(W_BOREAL, "Boreal Wood Wall", 30, Items.BOREAL_WALL, Pal.BOREAL_D, false);
 
         TileArt.build();
     }
@@ -240,24 +280,43 @@ final class Tiles {
     }
 
     static boolean isTrunk(int t) {
-        return t == TRUNK || t == MAHOGANY_TRUNK || t == EBON_TRUNK;
+        return t == TRUNK || t == MAHOGANY_TRUNK || t == EBON_TRUNK || t == BOREAL_TRUNK;
     }
 
     static boolean isLeaves(int t) {
-        return t == LEAVES || t == MAHOGANY_LEAVES || t == EBON_LEAVES;
+        return t == LEAVES || t == MAHOGANY_LEAVES || t == EBON_LEAVES || t == BOREAL_LEAVES;
     }
 
     /** Leaves that belong to a trunk type. */
     static int leavesOf(int trunk) {
-        return trunk == MAHOGANY_TRUNK ? MAHOGANY_LEAVES : trunk == EBON_TRUNK ? EBON_LEAVES : LEAVES;
+        return trunk == MAHOGANY_TRUNK ? MAHOGANY_LEAVES : trunk == EBON_TRUNK ? EBON_LEAVES
+                : trunk == BOREAL_TRUNK ? BOREAL_LEAVES : LEAVES;
     }
 
     static boolean isGrass(int t) {
         return t == GRASS || t == JUNGLE_GRASS || t == CORRUPT_GRASS;
     }
 
+    /** Ground a tree can grow on (grass, or snow for boreal trees). */
+    static boolean isTreeGround(int t) {
+        return isGrass(t) || t == SNOW;
+    }
+
+    static boolean isMoss(int t) {
+        return MOSS[t] != null;
+    }
+
+    static boolean isGem(int t) {
+        return t >= RUBY && t <= TOPAZ;
+    }
+
+    /** Plain or moss-covered stone (moss grows on it, gems and ores replace it). */
+    static boolean isStone(int t) {
+        return t == STONE || isMoss(t);
+    }
+
     static boolean isChest(int t) {
-        return t == CHEST || t == GOLD_CHEST;
+        return t == CHEST || t == GOLD_CHEST || t == ICE_CHEST;
     }
 
     static boolean isDoor(int t) {

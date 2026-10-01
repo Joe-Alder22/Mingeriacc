@@ -7,8 +7,8 @@ import java.util.Random;
  * soft glow, soft clouds and parallax layers of hills and forests.
  */
 final class Background {
-    static final int FOREST = 0, DESERT = 1, JUNGLE = 2, CORRUPTION = 3, OCEAN = 4, UNDERWORLD = 5;
-    static final int BIOMES = 6;
+    static final int FOREST = 0, DESERT = 1, JUNGLE = 2, CORRUPTION = 3, OCEAN = 4, UNDERWORLD = 5, SNOW = 6;
+    static final int BIOMES = 7;
 
     private final Noise noise = new Noise(777);
     private final Cloud[] clouds;
@@ -16,6 +16,9 @@ final class Background {
     private final Sprite[] jungleTrees = new Sprite[4], deadTrees = new Sprite[4], spires = new Sprite[4];
     /** Camera height at which the underworld background sits in the middle of the view. */
     double hellRefY;
+    /** A blood moon colours the night sky red. */
+    boolean bloodMoon;
+    private int capColor, capDepth;   // snow caps on the next landscape layer
     private final double[] amount = new double[BIOMES];
     private double cloudDrift;
     private int[] grad = new int[0];
@@ -287,6 +290,15 @@ final class Background {
             }
         }
 
+        double blood = bloodMoon ? 1 - day : 0;
+        if (blood > 0.01) {
+            int a = (int) (blood * 200);
+            for (int i = 0; i < s.w * s.h; i++) {
+                int c = s.px[i];
+                s.px[i] = Pal.blend(c, Pal.add(Pal.mul(c, 200, 70, 70), 0x3a0606, 256), a);
+            }
+        }
+
         // stars
         if (day < 0.8) {
             int a = (int) ((1 - day / 0.8) * 220);
@@ -309,6 +321,12 @@ final class Background {
             s.glow(bx, by, 22, sunC, 160);
             s.disc(bx, by, 7.5, sunC, 256);
             s.disc(bx - 1, by - 1, 5, 0xfffcf0, 256);
+        } else if (bloodMoon) {
+            s.glow(bx, by, 50, 0xc02020, 70);
+            s.disc(bx, by, 7.5, 0xd83a32, 256);
+            s.disc(bx - 2, by - 2, 1.6, 0xa82420, 200);
+            s.disc(bx + 2, by + 1, 2.2, 0xb02a24, 200);
+            s.disc(bx - 1, by + 3, 1.2, 0xb02a24, 200);
         } else {
             s.glow(bx, by, 40, 0x8090c0, 45);
             s.disc(bx, by, 7, 0xdcdcee, 256);
@@ -336,6 +354,7 @@ final class Background {
         // landscape layers
         int dimCol = Pal.lerp(0x3a4668, 0xffffff, 0.22 + 0.78 * day);
         if (tw > 0) dimCol = Pal.lerp(dimCol, 0xffd0b8, tw * 0.35);
+        if (blood > 0.01) dimCol = Pal.lerp(dimCol, 0x8a3a3a, blood * 0.6);
         double corr = amount[CORRUPTION];
         if (corr > 0.01) {
             // the corruption darkens the sky
@@ -351,6 +370,7 @@ final class Background {
                 case JUNGLE: jungle(s, camX, camY, camSpawnY, bot, dimCol, a); break;
                 case CORRUPTION: corruption(s, camX, camY, camSpawnY, bot, dimCol, a); break;
                 case OCEAN: ocean(s, camX, camY, camSpawnY, bot, dimCol, a); break;
+                case SNOW: snow(s, camX, camY, camSpawnY, bot, dimCol, a); break;
                 default: break;
             }
         }
@@ -373,6 +393,22 @@ final class Background {
                 deadTrees, 9, 9, false);
         layer(s, camX, camY, camSpawnY, horizon, dim, a, 0x34284a, 0.69, 0.32, 0.32, 70, 30, 157, 0.05,
                 deadTrees, 8, 11, false);
+    }
+
+    /** Snow: pale mountains with white caps, a dark pine forest and white drifts. */
+    private void snow(Screen s, double camX, double camY, double camSpawnY, int horizon, int dim, int a) {
+        capColor = 0xf4f8ff;
+        capDepth = 12;
+        layer(s, camX, camY, camSpawnY, horizon, dim, a, 0x9ab0cc, 0.47, 0.12, 0.08, 200, 120, 223, 0.4,
+                null, 0, 0, false);
+        capColor = 0;
+        layer(s, camX, camY, camSpawnY, horizon, dim, a, 0x3e5a64, 0.59, 0.2, 0.18, 160, 46, 229, 0.25,
+                pines, 6, 11, false);
+        capColor = 0xffffff;
+        capDepth = 5;
+        layer(s, camX, camY, camSpawnY, horizon, dim, a, 0xd8e2f0, 0.69, 0.32, 0.32, 130, 26, 239, 0.04,
+                pines, 17, 4, false);
+        capColor = 0;
     }
 
     private void ocean(Screen s, double camX, double camY, double camSpawnY, int horizon, int dim, int a) {
@@ -435,6 +471,11 @@ final class Background {
         if (grad.length < s.h + 1) grad = new int[s.h + (int) amp + 200];
         for (int d = 0; d < grad.length; d++)
             grad[d] = d < 2 ? cLit : Pal.lerp(c, fog, Math.min(1, d / (double) span * 1.6) * 0.6);
+        if (capColor != 0) {
+            int cap = Pal.mulLight(Pal.lerp(capColor, horizonCol, haze * 0.5), dim);
+            for (int d = 0; d < capDepth && d < grad.length; d++)
+                grad[d] = Pal.lerp(cap, grad[d], Math.max(0, (d - capDepth * 0.5) / (capDepth * 0.5)));
+        }
         for (int x = 0; x < s.w; x++) {
             double wx = x + camX * fx + seed;
             double n = dunes ? Math.sin(wx / scale * 2.2) * 0.35 + noise.fractal(wx / (scale * 1.7), seed, 2) * 0.65

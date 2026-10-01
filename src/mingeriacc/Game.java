@@ -28,6 +28,9 @@ final class Game {
     final List<Mob> mobs = new ArrayList<>();
     final List<Mob> town = new ArrayList<>();
     final List<Projectile> projectiles = new ArrayList<>();
+    final List<Magic.Bolt> bolts = new ArrayList<>();
+    /** The character being played (null on the title screen). */
+    Profile profile;
     /** Current biome around the player (Background.FOREST...). */
     int biome;
     Mob talkTo;
@@ -48,6 +51,11 @@ final class Game {
     String deathText;
     /** Crafting stations near the player, indexed by tile ID. */
     final boolean[] nearStation = new boolean[Tiles.COUNT];
+    /** Frames until the Eye of Cthulhu arrives by itself (0 = not coming). */
+    int eyeTimer;
+    // cheats (developer menu)
+    double miningSpeed = 1;
+    boolean godMode;
 
     // targeted tile (under the mouse)
     int aimX, aimY;
@@ -57,6 +65,9 @@ final class Game {
     private final HashMap<Integer, float[]> tileDamage = new HashMap<>();
     private final HashMap<Integer, float[]> wallDamage = new HashMap<>();
     private int hintCooldown;
+    private int lastTapDir;
+    private long lastTapTick;
+    private int manaPotionCooldown;
 
     static final class Popup {
         String text;
@@ -78,11 +89,9 @@ final class Game {
         this.audio = audio;
     }
 
+    /** A freshly generated world: the guide is waiting at the spawn point. */
     void startNew() {
-        player.spawnAt(world);
-        inv.giveStarterKit();
-        town.add(Town.create(this, Mobs.GUIDE, player.centerX() + 24, player.y + Player.H));
-        snapCamera();
+        town.add(Town.create(this, Mobs.GUIDE, world.spawnX * T + 24, world.spawnY * T));
         message("Welcome to " + world.name + "!", Pal.UI_SEL);
         message("E = inventory and crafting, ESC = menu", Pal.UI_TEXT);
     }
@@ -100,12 +109,15 @@ final class Game {
 
     void update(Input in, boolean uiBlocksWorld) {
         ticks++;
+        if (profile != null) profile.playTicks++;
+        double prevTime = world.time;
         world.time += HOURS_PER_TICK;
         if (world.time >= 24) {
             world.time -= 24;
             world.day++;
         }
         if (hintCooldown > 0) hintCooldown--;
+        if (manaPotionCooldown > 0) manaPotionCooldown--;
 
         if (ticks % 30 == 0) detectBiome();
         if (player.dead) {
@@ -121,16 +133,20 @@ final class Game {
             if (player.didDoubleJump) {
                 for (int i = 0; i < 10; i++) {
                     Particle p = new Particle(player.centerX() + (rnd.nextDouble() - 0.5) * 10, player.y + Player.H,
-                            (rnd.nextDouble() - 0.5) * 1.2, rnd.nextDouble() * 0.4, 25 + rnd.nextInt(15), 0xf0f4ff, 0);
+                            (rnd.nextDouble() - 0.5) * 1.2, rnd.nextDouble() * 0.4, 25 + rnd.nextInt(15),
+                            player.doubleJumpPower > 1 ? 0xd8ecff : 0xf0f4ff, 0);
                     p.noCollide = true;
                     particles.add(p);
                 }
                 playAt(Audio.JUMP, player.centerX(), 0.6, 1.2);
             }
+            if (player.dashTimer == Player.DASH_TIME) playAt(Audio.SWING, player.centerX(), 0.5, 0.6);
+            if (player.dashTimer > 0 && ticks % 2 == 0) dust(player.centerX(), player.y + Player.H - 2, 0xe0e0e8, 2);
             if (player.sprint && player.runTimer > 50 && player.onGround && ticks % 3 == 0)
                 dust(player.centerX(), player.y + Player.H - 1, 0xd8d8e0, 1);
             playerEffects();
             player.regenerate();
+            player.regenerateMana();
         }
 
         updateAim(in);
@@ -141,13 +157,18 @@ final class Game {
         checkDistance();
 
         Combat.melee(this);
+        Combat.dash(this);
         updateMobs();
         for (Mob m : town) if (!m.dead) Mobs.update(m, this);
         town.removeIf(m -> m.dead);
         if (ticks % 300 == 0 && !hidePlayer) Town.update(this);
         Combat.contact(this);
         Combat.projectiles(this);
-        if (!hidePlayer) Mobs.trySpawn(this);
+        Magic.update(this);
+        if (!hidePlayer) {
+            Mobs.trySpawn(this);
+            Events.update(this, prevTime);
+        }
 
         world.liquids.step(3000, ticks % 5 == 0);
         if (world.liquids.hissX >= 0) {
@@ -197,6 +218,18 @@ final class Game {
         }
         if (in.pressed(KeyEvent.VK_Q)) throwSelected();
         if (in.pressed(KeyEvent.VK_H)) quickHeal();
+        // a double tap left or right dashes (Shield of the Eye)
+        int tap = in.pressed(KeyEvent.VK_A) || in.pressed(KeyEvent.VK_LEFT) ? -1
+                : in.pressed(KeyEvent.VK_D) || in.pressed(KeyEvent.VK_RIGHT) ? 1 : 0;
+        if (tap != 0) {
+            if (tap == lastTapDir && ticks - lastTapTick < 15) {
+                player.dashRequest = tap;
+                lastTapDir = 0;
+            } else {
+                lastTapDir = tap;
+                lastTapTick = ticks;
+            }
+        }
     }
 
     void selectSlot(int s) {
@@ -250,6 +283,12 @@ final class Game {
         return false;
     }
 
+    /** Whether the player carries a magic weapon (mana stars only drop then). */
+    boolean carriesMagic() {
+        for (int i = 0; i < Inventory.SIZE; i++) if (inv.id[i] != 0 && Items.isMagic(inv.id[i])) return true;
+        return false;
+    }
+
     // ---- equipment and effects --------------------------------------------------
 
     /** Sets the player's stats from worn armour and accessories. */
@@ -260,14 +299,22 @@ final class Game {
         p.jumpBoost = 0;
         p.regenBonus = 0;
         p.damageBonus = 0;
-        p.sprint = p.doubleJump = p.noFall = p.fireImmune = p.swim = p.headLight = false;
+        p.magicBonus = 0;
+        p.manaBonus = 0;
+        p.doubleJumpPower = 1;
+        p.sprint = p.doubleJump = p.noFall = p.fireImmune = p.swim = p.headLight = p.canDash = p.iceSkates = false;
         p.setBonus = "";
         int[] a = inv.armor;
         for (int id : a) if (id != 0) p.defense += Items.DEFENSE[id];
         p.look.helm = a[0] != 0 ? Items.ARMOR_RAMP[a[0]] : null;
         p.look.body = a[1] != 0 ? Items.ARMOR_RAMP[a[1]] : null;
         p.look.legs = a[2] != 0 ? Items.ARMOR_RAMP[a[2]] : null;
+        p.look.pointyHat = a[0] == Items.ARCANE_HAT;
         if (a[0] == Items.MINING_HELMET) p.headLight = true;
+        if (a[0] == Items.ARCANE_HAT) {
+            p.magicBonus += 0.1;
+            p.manaBonus += 20;
+        }
         // set bonus: three pieces of the same metal
         if (a[0] >= Items.COPPER_HELMET && a[0] <= Items.MOLTEN_GREAVES && a[0] != 0) {
             int set = (a[0] - Items.COPPER_HELMET) / 3;
@@ -281,9 +328,11 @@ final class Game {
             }
         }
         for (int id : inv.acc) {
+            p.defense += Items.DEFENSE[id];
             switch (id) {
                 case Items.HERMES_BOOTS: p.sprint = true; break;
                 case Items.CLOUD_BOTTLE: p.doubleJump = true; break;
+                case Items.BLIZZARD_BOTTLE: p.doubleJump = true; p.doubleJumpPower = 1.5; break;
                 case Items.BAND_REGEN: p.regenBonus += 1; break;
                 case Items.HORSESHOE: p.noFall = true; break;
                 case Items.AGLET: p.moveSpeed += 0.05; break;
@@ -291,9 +340,13 @@ final class Game {
                 case Items.ANKLET: p.moveSpeed += 0.1; break;
                 case Items.OBSIDIAN_SKULL: p.fireImmune = true; break;
                 case Items.FLIPPER: p.swim = true; break;
+                case Items.BAND_STARPOWER: p.manaBonus += 20; break;
+                case Items.EYE_SHIELD: p.canDash = true; break;
+                case Items.ICE_SKATES: p.iceSkates = true; break;
                 default: break;
             }
         }
+        if (p.mana > p.manaCap()) p.mana = p.manaCap();
     }
 
     /** Lava, burning, poison and drowning. */
@@ -310,6 +363,11 @@ final class Game {
         }
         if (p.poisoned > 0 && ticks % 20 == 0) Combat.dotPlayer(this, 1, "poisoned");
         if (p.breath <= 0 && ticks % 20 == 0) Combat.dotPlayer(this, 2, "drowned");
+        if (p.chilled > 0 && rnd.nextInt(5) == 0) {
+            Particle pa = new Particle(p.x + rnd.nextDouble() * p.w, p.y + rnd.nextDouble() * p.h, 0, 0.2, 25, Pal.ICE_L, 0);
+            pa.noCollide = true;
+            particles.add(pa);
+        }
     }
 
     /** A flame particle. */
@@ -345,7 +403,7 @@ final class Game {
             biome = Background.UNDERWORLD;
             return;
         }
-        int jungle = 0, corrupt = 0, sand = 0;
+        int jungle = 0, corrupt = 0, sand = 0, snow = 0;
         for (int y = cy - 28; y <= cy + 28; y += 2)
             for (int x = cx - 45; x <= cx + 45; x += 2) {
                 int t = world.tile(x, y);
@@ -360,6 +418,9 @@ final class Game {
                     case Tiles.SAND:
                         sand++;
                         break;
+                    case Tiles.SNOW: case Tiles.ICE: case Tiles.BOREAL_TRUNK: case Tiles.BOREAL_LEAVES:
+                        snow++;
+                        break;
                     default:
                         break;
                 }
@@ -367,6 +428,7 @@ final class Game {
         boolean surface = cy < world.surfaceLevel + 10;
         if (corrupt >= 90) biome = Background.CORRUPTION;
         else if (jungle >= 130) biome = Background.JUNGLE;
+        else if (snow >= 120) biome = Background.SNOW;
         else if (surface && (cx < 110 || cx > world.w - 110)) biome = Background.OCEAN;
         else if (surface && sand >= 160) biome = Background.DESERT;
         else biome = Background.FOREST;
@@ -429,7 +491,11 @@ final class Game {
             playAt(Audio.SWING, player.centerX(), 0.3, 0.9 + rnd.nextDouble() * 0.2);
             if (aimInRange) useTool(item, aimX, aimY);
         } else if (kind == Items.K_WEAPON) {
-            if (Items.STYLE[item] == Items.S_SHOOT) {
+            if (Items.isMagic(item)) {
+                if (!Magic.canCast(this, item)) return;
+                startUse(item);
+                Magic.cast(this, item);
+            } else if (Items.STYLE[item] == Items.S_SHOOT) {
                 int slot = inv.findAmmo(Items.USE_AMMO[item]);
                 if (slot < 0) {
                     hint("You need arrows (craft them at a work bench)");
@@ -442,6 +508,7 @@ final class Game {
             } else {
                 startUse(item);
                 playAt(Audio.SWING, player.centerX(), 0.35, 0.85 + rnd.nextDouble() * 0.2);
+                if (Items.PROJ[item] != 0) swordBolt(item);
                 if (aimInRange) {
                     int t = world.tile(aimX, aimY);
                     if (Tiles.FRAGILE[t] && t != Tiles.TORCH && t != Tiles.SAPLING) breakTile(aimX, aimY, true);
@@ -464,7 +531,103 @@ final class Game {
             }
         } else if (kind == Items.K_BUCKET) {
             if (aimInRange && useBucket(item, aimX, aimY)) startUse(item);
+        } else if (kind == Items.K_SEED) {
+            if (aimInRange && plantSeeds(Items.PLACE[item], aimX, aimY)) {
+                startUse(item);
+                inv.consumeSelected();
+            }
+        } else if (kind == Items.K_USE) {
+            if (useSpecial(item)) {
+                startUse(item);
+                if (item != Items.MAGIC_MIRROR) inv.consumeSelected();
+            }
         }
+    }
+
+    /** Swords that shoot (the Ice Blade). */
+    private void swordBolt(int item) {
+        Player p = player;
+        double a = Math.atan2(mouseWY - p.shoulderY(), mouseWX - p.shoulderX());
+        double speed = Items.SHOOT_SPEED[item];
+        Projectile pr = new Projectile(Items.PROJ[item], p.shoulderX() + Math.cos(a) * 6, p.shoulderY() + Math.sin(a) * 6,
+                Math.cos(a) * speed, Math.sin(a) * speed);
+        pr.damage = (int) Math.round(Items.DAMAGE[item] * (1 + p.damageBonus));
+        pr.knock = Items.KNOCK[item] * 0.5;
+        pr.crit = Items.CRIT[item];
+        pr.effect = Items.EFFECT[item];
+        projectiles.add(pr);
+        playAt(Audio.FREEZE, p.centerX(), 0.25, 1.4);
+    }
+
+    /** Items with a use of their own: the magic mirror, summoning items and powders. */
+    private boolean useSpecial(int item) {
+        switch (item) {
+            case Items.MAGIC_MIRROR:
+                recall();
+                return true;
+            case Items.SUSPICIOUS_EYE:
+                return Boss.summonEye(this);
+            case Items.PURIFICATION_POWDER:
+                purify(aimX, aimY);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** The magic mirror: back to the bed or the spawn point. */
+    private void recall() {
+        Player p = player;
+        burst(p.centerX(), p.centerY(), 0xb8e0ff, 24, 1.8);
+        playAt(Audio.MIRROR, p.centerX(), 0.6, 1.0);
+        int fire = p.onFire, poison = p.poisoned, chill = p.chilled;
+        p.spawnAt(world);
+        p.onFire = fire;
+        p.poisoned = poison;
+        p.chilled = chill;
+        snapCamera();
+        burst(p.centerX(), p.centerY(), 0xb8e0ff, 24, 1.8);
+        closeTalk();
+        if (openChest != null) closeChest();
+    }
+
+    /** Purification powder: the corruption around the aimed point turns back to normal. */
+    private void purify(int cx, int cy) {
+        int r = 5;
+        for (int y = cy - r; y <= cy + r; y++)
+            for (int x = cx - r; x <= cx + r; x++) {
+                if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > r * r || !world.inside(x, y)) continue;
+                int t = world.tile(x, y), to = -1;
+                if (t == Tiles.EBONSTONE) to = Tiles.STONE;
+                else if (t == Tiles.CORRUPT_GRASS) to = Tiles.GRASS;
+                else if (t == Tiles.EBONSAND) to = Tiles.SAND;
+                else if (t == Tiles.CORRUPT_PLANT) to = Tiles.TUFT;
+                if (to >= 0) {
+                    world.set(x, y, to);
+                    if (rnd.nextInt(3) == 0) burst(x * T + 4, y * T + 4, 0x9ae8ff, 1, 0.6);
+                }
+                if (world.wall(x, y) == Tiles.W_EBON_N) world.setWall(x, y, Tiles.W_STONE_N);
+            }
+        for (int i = 0; i < 30; i++) {
+            Particle p = new Particle(cx * T + 4 + (rnd.nextDouble() - 0.5) * r * T * 2, cy * T + 4 + (rnd.nextDouble() - 0.5) * r * T * 2,
+                    (rnd.nextDouble() - 0.5) * 0.4, -0.2 - rnd.nextDouble() * 0.4, 30 + rnd.nextInt(30), 0x9ae8ff, -0.005);
+            p.glow = true;
+            p.noCollide = true;
+            particles.add(p);
+        }
+        playAt(Audio.SPELL, cx * T, 0.45, 1.6);
+    }
+
+    /** Grass seeds on dirt, jungle seeds on mud. */
+    private boolean plantSeeds(int grass, int tx, int ty) {
+        int need = grass == Tiles.JUNGLE_GRASS ? Tiles.MUD : Tiles.DIRT;
+        if (world.tile(tx, ty) != need) return false;
+        boolean open = !world.solid(tx, ty - 1) || !world.solid(tx - 1, ty) || !world.solid(tx + 1, ty) || !world.solid(tx, ty + 1);
+        if (!open) return false;
+        world.set(tx, ty, grass);
+        hitParticles(tx, ty, grass == Tiles.GRASS ? Pal.GRASS_L : Pal.JGRASS_L, 4);
+        playAt(Audio.GRASS, tx * T, 0.4, 1.1);
+        return true;
     }
 
     private boolean useBucket(int item, int tx, int ty) {
@@ -520,13 +683,14 @@ final class Game {
                 for (int dy = 0; dy < 3; dy++) {
                     if (player.overlapsTile(hinge, oy + dy)) return;
                     for (Mob m : mobs) if (m.overlapsTile(hinge, oy + dy)) return;
+                    for (Mob m : town) if (m.overlapsTile(hinge, oy + dy)) return;
                 }
                 world.removeFurniture(ox, oy);
                 world.placeFurniture(Tiles.DOOR_CLOSED, hinge, oy, 0);
                 playAt(Audio.DOOR, hinge * T, 0.5, 0.8);
                 break;
             }
-            case Tiles.CHEST: case Tiles.GOLD_CHEST: {
+            case Tiles.CHEST: case Tiles.GOLD_CHEST: case Tiles.ICE_CHEST: {
                 World.Chest c = world.chests.get(ox + oy * world.w);
                 if (c == null) {
                     c = new World.Chest(ox, oy);
@@ -567,7 +731,14 @@ final class Game {
         return true;
     }
 
-    /** Buys an item from the merchant. */
+    /** A creature pushes a closed door open (blood moon), swinging it away from itself. */
+    void mobOpensDoor(int tx, int ty, int dir) {
+        if (world.tile(tx, ty) != Tiles.DOOR_CLOSED) return;
+        int ox = world.originX(tx, ty), oy = world.originY(tx, ty);
+        if (!openDoor(ox, oy, dir)) openDoor(ox, oy, -dir);
+    }
+
+    /** Buys an item from a shop. */
     void buy(int item) {
         int price = Items.VALUE[item];
         if (!inv.spend(price)) {
@@ -579,7 +750,7 @@ final class Game {
         playAt(Audio.COIN, player.centerX(), 0.5, 1.0);
     }
 
-    /** Sells an item stack to the merchant. */
+    /** Sells an item stack to a shop. */
     void sell(int item, int count) {
         long v = (long) Items.sellPrice(item) * count;
         if (v > 0) inv.giveMoney(v);
@@ -598,7 +769,7 @@ final class Game {
             return;
         }
         player.life = player.lifeMax;
-        player.onFire = player.poisoned = 0;
+        player.onFire = player.poisoned = player.chilled = 0;
         talkText = "All better! Try to be more careful.";
         playAt(Audio.HEAL, player.centerX(), 0.6, 1.0);
     }
@@ -614,6 +785,7 @@ final class Game {
         pr.damage = (int) Math.round((Items.DAMAGE[weapon] + Items.DAMAGE[ammo]) * (1 + p.damageBonus));
         pr.knock = Items.KNOCK[weapon];
         pr.crit = Items.CRIT[weapon];
+        if (Items.PIERCE[ammo] > 0) pr.pierce = Items.PIERCE[ammo];
         projectiles.add(pr);
         playAt(Audio.BOW, p.centerX(), 0.5, 0.95 + rnd.nextDouble() * 0.1);
     }
@@ -630,14 +802,29 @@ final class Game {
             p.life = Math.min(p.lifeMax, p.life + 20);
             number(p.centerX(), p.y - 4, 20, Pal.UI_HEAL, false);
             playAt(Audio.CRYSTAL, p.centerX(), 0.7, 1.0);
-            for (int i = 0; i < 20; i++) {
-                Particle pa = new Particle(p.centerX() + (rnd.nextDouble() - 0.5) * 12, p.centerY() + (rnd.nextDouble() - 0.5) * 18,
-                        (rnd.nextDouble() - 0.5) * 0.6, -0.4 - rnd.nextDouble() * 0.8, 40 + rnd.nextInt(30), Pal.CRYSTAL_L, 0);
-                pa.glow = true;
-                pa.noCollide = true;
-                particles.add(pa);
-            }
+            sparkle(Pal.CRYSTAL_L);
             message("Maximum life is now " + p.lifeMax, Pal.CRYSTAL_L);
+            return true;
+        }
+        if (item == Items.MANA_CRYSTAL) {
+            if (p.manaMax >= Player.MAX_MANA_CAP) {
+                hint("Your maximum mana can't grow any more");
+                return false;
+            }
+            p.manaMax += 20;
+            p.mana = Math.min(p.manaCap(), p.mana + 20);
+            number(p.centerX(), p.y - 4, 20, Pal.UI_MANA, false);
+            playAt(Audio.STAR, p.centerX(), 0.7, 0.8);
+            sparkle(Pal.MANA_L);
+            message("Maximum mana is now " + p.manaMax, Pal.UI_MANA);
+            return true;
+        }
+        if (item == Items.MANA_POTION) {
+            if (p.mana >= p.manaCap()) {
+                hint("Your mana is already full");
+                return false;
+            }
+            restoreMana(50);
             return true;
         }
         int heal = Items.HEAL[item];
@@ -658,6 +845,35 @@ final class Game {
             return true;
         }
         return false;
+    }
+
+    private void sparkle(int color) {
+        Player p = player;
+        for (int i = 0; i < 20; i++) {
+            Particle pa = new Particle(p.centerX() + (rnd.nextDouble() - 0.5) * 12, p.centerY() + (rnd.nextDouble() - 0.5) * 18,
+                    (rnd.nextDouble() - 0.5) * 0.6, -0.4 - rnd.nextDouble() * 0.8, 40 + rnd.nextInt(30), color, 0);
+            pa.glow = true;
+            pa.noCollide = true;
+            particles.add(pa);
+        }
+    }
+
+    private void restoreMana(int amount) {
+        Player p = player;
+        int got = Math.min(amount, p.manaCap() - p.mana);
+        p.mana += got;
+        if (got > 0) number(p.centerX(), p.y - 4, got, Pal.UI_MANA, false);
+        playAt(Audio.HEAL, p.centerX(), 0.5, 1.3);
+    }
+
+    /** Drinks a mana potion from the inventory when a spell needs more mana. */
+    void autoManaPotion() {
+        if (manaPotionCooldown > 0 || player.mana >= player.manaCap()) return;
+        int slot = inv.find(Items.MANA_POTION);
+        if (slot < 0) return;
+        inv.consume(slot);
+        restoreMana(50);
+        manaPotionCooldown = 60;
     }
 
     private void quickHeal() {
@@ -683,7 +899,7 @@ final class Game {
 
     private void useTool(int item, int tx, int ty) {
         int tool = Items.TOOL[item];
-        int power = Items.POWER[item];
+        double power = Items.POWER[item] * miningSpeed;
         if (!world.inside(tx, ty)) return;
         int t = world.tile(tx, ty);
 
@@ -700,7 +916,7 @@ final class Game {
                 hint("The bottom of the world cannot be broken");
                 return;
             }
-            if (power < Tiles.MIN_PICK[t]) {
+            if (Items.POWER[item] < Tiles.MIN_PICK[t]) {
                 hint("Your pickaxe is not strong enough for " + Tiles.NAME[t]);
                 return;
             }
@@ -774,14 +990,14 @@ final class Game {
     }
 
     /** Adds damage; returns true if the tile breaks. */
-    private boolean damage(HashMap<Integer, float[]> map, int tx, int ty, int power, int hp) {
+    private boolean damage(HashMap<Integer, float[]> map, int tx, int ty, double power, int hp) {
         int key = tx + ty * world.w;
         float[] d = map.get(key);
         if (d == null) {
             d = new float[2];
             map.put(key, d);
         }
-        d[0] += power;
+        d[0] += (float) power;
         d[1] = 0;
         if (d[0] >= hp) {
             map.remove(key);
@@ -867,6 +1083,8 @@ final class Game {
         else if (roll < 32) spawnDrop(tx, ty, Items.TORCH, 3 + rnd.nextInt(6));
         else if (roll < 47) spawnDrop(tx, ty, Items.WOOD_ARROW, 8 + rnd.nextInt(12));
         else if (roll < 55) spawnDrop(tx, ty, Items.MUSHROOM, 1 + rnd.nextInt(2));
+        else if (roll < 60 && carriesMagic()) spawnDrop(tx, ty, Items.MANA_POTION, 1);
+        else if (roll < 66 && depth >= Mobs.ZONE_CAVERN) spawnDrop(tx, ty, Items.RUBY + rnd.nextInt(4), 1);
         int coins = (int) ((30 + rnd.nextInt(90)) * (1 + depth * 0.8));
         spawnCoins(tx * T + T, ty * T + T, coins);
     }
@@ -874,7 +1092,10 @@ final class Game {
     /** Checks things attached to tiles (torches, plants, furniture) after a change. */
     private void neighborsChanged(int tx, int ty) {
         int above = world.tile(tx, ty - 1);
-        if (Tiles.NEEDS_GROUND[above] && !Tiles.isGrass(world.tile(tx, ty))) breakTile(tx, ty - 1, true);
+        int here0 = world.tile(tx, ty);
+        boolean ground = above == Tiles.MOSS_PLANT ? Tiles.isMoss(here0)
+                : above == Tiles.SAPLING ? Tiles.isTreeGround(here0) : Tiles.isGrass(here0);
+        if (Tiles.NEEDS_GROUND[above] && !ground) breakTile(tx, ty - 1, true);
         // vines hang from jungle grass
         int below = world.tile(tx, ty + 1);
         int here = world.tile(tx, ty);
@@ -922,14 +1143,14 @@ final class Game {
             if (Tiles.isLeaves(world.tile(tx + 1, y))) removeLeaf(tx + 1, y);
             hitParticles(tx, y, Pal.BARK, 2);
         }
-        // canopy: connected leaves from the top of the trunk
+        // canopy: connected leaves from the top of the trunk (boreal pines are tall)
         ArrayList<int[]> stack = new ArrayList<>();
         stack.add(new int[]{tx, top - 1});
         int guard = 0;
-        while (!stack.isEmpty() && guard++ < 400) {
+        while (!stack.isEmpty() && guard++ < 600) {
             int[] p = stack.remove(stack.size() - 1);
             if (!Tiles.isLeaves(world.tile(p[0], p[1]))) continue;
-            if (Math.abs(p[0] - tx) > 5 || Math.abs(p[1] - top) > 6) continue;
+            if (Math.abs(p[0] - tx) > 5 || p[1] < top - 12 || p[1] > base) continue;
             removeLeaf(p[0], p[1]);
             stack.add(new int[]{p[0] + 1, p[1]});
             stack.add(new int[]{p[0] - 1, p[1]});
@@ -937,14 +1158,15 @@ final class Game {
             stack.add(new int[]{p[0], p[1] - 1});
         }
         spawnDrop(tx, base, Tiles.DROP[trunkType], wood);
-        if (trunkType == Tiles.TRUNK && rnd.nextDouble() < 0.8) spawnDrop(tx, top, Items.ACORN, 1 + rnd.nextInt(2));
+        if ((trunkType == Tiles.TRUNK || trunkType == Tiles.BOREAL_TRUNK) && rnd.nextDouble() < 0.8)
+            spawnDrop(tx, top, Items.ACORN, 1 + rnd.nextInt(2));
         playAt(Audio.TREE, tx * T, 0.7, 1.0);
         neighborsChanged(tx, base);
     }
 
     private void removeLeaf(int x, int y) {
         world.set(x, y, Tiles.AIR);
-        if (rnd.nextInt(3) == 0) hitParticles(x, y, rnd.nextBoolean() ? Pal.LEAF : Pal.LEAF_L, 1);
+        if (rnd.nextInt(3) == 0) hitParticles(x, y, rnd.nextBoolean() ? Pal.LEAF_L : Pal.LEAF, 1);
     }
 
     private boolean placeTile(int t, int tx, int ty) {
@@ -960,7 +1182,7 @@ final class Game {
         if (t == Tiles.TORCH) {
             if (!torchSupported(tx, ty)) return false;
         } else if (t == Tiles.SAPLING) {
-            if (world.tile(tx, ty + 1) != Tiles.GRASS || cur != Tiles.AIR) return false;
+            if (!Tiles.isTreeGround(world.tile(tx, ty + 1)) || cur != Tiles.AIR) return false;
         } else {
             boolean anchor = world.wall(tx, ty) != 0;
             int[][] n = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
@@ -1025,10 +1247,14 @@ final class Game {
     // ---- creatures -----------------------------------------------------------
 
     private void updateMobs() {
-        for (Mob m : mobs) {
+        // a loop by index: creatures may add others (the Eye calls its servants)
+        for (int i = 0; i < mobs.size(); i++) {
+            Mob m = mobs.get(i);
             if (m.dead) continue;
             Mobs.update(m, this);
-            if (m.type == Mobs.ZOMBIE && rnd.nextInt(900) == 0) playAt(Audio.ZOMBIE, m.centerX(), 0.4, 0.8 + rnd.nextDouble() * 0.3);
+            int idle = Mobs.IDLE_SOUND[m.type];
+            if (idle >= 0 && rnd.nextInt(Mobs.IDLE_RATE[m.type]) == 0)
+                playAt(idle, m.centerX(), idle == Audio.BUZZ ? 0.25 : 0.4, 0.85 + rnd.nextDouble() * 0.3);
             if (Mobs.shouldDespawn(m, this)) m.dead = true;
         }
         mobs.removeIf(m -> m.dead);
@@ -1067,7 +1293,12 @@ final class Game {
     private void updateDrops() {
         for (Drop d : drops) {
             if (d.dead) continue;
-            d.update(world, player, inv.canAccept(d.item));
+            boolean pickup = Items.KIND[d.item] == Items.K_PICKUP;
+            if (pickup && d.age > 60 * 30) {
+                d.dead = true;
+                continue;
+            }
+            d.update(world, player, pickup || inv.canAccept(d.item));
             int dtx = (int) ((d.x + 3) / T), dty = (int) ((d.y + 3) / T);
             if (world.isLava(dtx, dty) && world.liquidAt(dtx, dty) > 60 && d.item != Items.OBSIDIAN
                     && d.item != Items.HELLSTONE && d.item != Items.LAVA_BUCKET) {
@@ -1078,6 +1309,18 @@ final class Game {
             }
             double dx = player.centerX() - (d.x + 3), dy = player.centerY() - (d.y + 3);
             if (!player.dead && d.pickupDelay == 0 && Math.abs(dx) < 8 && Math.abs(dy) < 13) {
+                if (pickup) {
+                    if (d.item == Items.HEART) {
+                        int got = Math.min(20, player.lifeMax - player.life);
+                        player.life += got;
+                        if (got > 0) number(player.centerX(), player.y - 4, got, Pal.UI_HEAL, false);
+                        playAt(Audio.HEAL, player.centerX(), 0.3, 1.5);
+                    } else {
+                        restoreMana(50);
+                    }
+                    d.dead = true;
+                    continue;
+                }
                 int left = inv.add(d.item, d.count);
                 int got = d.count - left;
                 if (got > 0) {
@@ -1085,7 +1328,8 @@ final class Game {
                         playAt(Audio.COIN, player.centerX(), 0.4, 0.95 + rnd.nextDouble() * 0.15);
                     } else {
                         pickupPopup(d.item, got);
-                        playAt(Audio.PICKUP, player.centerX(), 0.35, 1.0 + rnd.nextDouble() * 0.1);
+                        playAt(d.item == Items.FALLEN_STAR ? Audio.STAR : Audio.PICKUP, player.centerX(), 0.35,
+                                1.0 + rnd.nextDouble() * 0.1);
                     }
                 }
                 d.count = left;
@@ -1096,7 +1340,7 @@ final class Game {
         if (ticks % 20 == 0) {
             for (int i = 0; i < drops.size(); i++) {
                 Drop a = drops.get(i);
-                if (a.dead) continue;
+                if (a.dead || Items.KIND[a.item] == Items.K_PICKUP) continue;
                 for (int j = i + 1; j < drops.size(); j++) {
                     Drop b = drops.get(j);
                     if (b.dead || b.item != a.item) continue;
@@ -1178,6 +1422,7 @@ final class Game {
 
     /** Plays a sound at a world position (panned and quieter far away). */
     void playAt(int sound, double x, double vol, double pitch) {
+        if (audio == null) return;
         double cx = camX + viewW / 2.0;
         double dx = x - cx;
         double pan = Math.max(-1, Math.min(1, dx / (viewW * 0.6)));
@@ -1186,23 +1431,35 @@ final class Game {
         if (vol > 0.01) audio.play(sound, vol, pitch, pan);
     }
 
-    /** Fireflies at night and falling leaves by day. */
+    /** Fireflies at night, falling leaves by day and snowflakes in the snow. */
     private void ambient() {
         if (hidePlayer && ticks % 2 == 0) return;
+        if (biome == Background.SNOW && camY / T < world.surfaceLevel + 4) {
+            // snowflakes drifting down from the sky
+            int sx = (int) (camX + rnd.nextDouble() * viewW);
+            int col = Math.max(0, Math.min(world.w - 1, sx / T));
+            if (world.skyTop[col] * T > camY && rnd.nextInt(2) == 0) {
+                Particle p = new Particle(sx, camY - 2, -0.15 + (rnd.nextDouble() - 0.5) * 0.3, 0.35 + rnd.nextDouble() * 0.25,
+                        360, rnd.nextInt(3) == 0 ? 0xffffff : 0xdce8f8, 0);
+                p.settle = true;
+                particles.add(p);
+            }
+        }
         if (ticks % 6 != 0) return;
         int tx = (int) (camX / T) + rnd.nextInt(Math.max(1, viewW / T));
         int ty = (int) (camY / T) + rnd.nextInt(Math.max(1, viewH / T));
         if (!world.inside(tx, ty)) return;
         int t = world.tile(tx, ty);
-        if (Tiles.isLeaves(t) && world.tile(tx, ty + 1) == Tiles.AIR && rnd.nextInt(3) == 0) {
+        if (Tiles.isLeaves(t) && t != Tiles.BOREAL_LEAVES && world.tile(tx, ty + 1) == Tiles.AIR && rnd.nextInt(3) == 0) {
             Particle p = new Particle(tx * T + rnd.nextDouble() * T, ty * T + T, 0.3, 0.25, 240,
                     rnd.nextBoolean() ? Pal.LEAF_L : Pal.LEAF, 0);
-            p.noCollide = false;
+            p.settle = true;
             particles.add(p);
         } else if (isNight() && t == Tiles.AIR && ty < world.surfaceLevel && ty < world.skyTop[tx]
-                && ty > world.surfaceAt(tx) - 8) {
+                && ty > world.surfaceAt(tx) - 8 && biome != Background.SNOW) {
             Particle p = new Particle(tx * T + rnd.nextDouble() * T, ty * T + rnd.nextDouble() * T,
-                    (rnd.nextDouble() - 0.5) * 0.3, (rnd.nextDouble() - 0.5) * 0.2, 200 + rnd.nextInt(200), 0xd8f070, 0);
+                    (rnd.nextDouble() - 0.5) * 0.3, (rnd.nextDouble() - 0.5) * 0.2, 200 + rnd.nextInt(200),
+                    world.bloodMoon ? 0xff5a4a : 0xd8f070, 0);
             p.glow = true;
             p.noCollide = true;
             p.drag = 0.995;
@@ -1262,8 +1519,18 @@ final class Game {
                 if (len < 8) world.set(x, y + 1, Tiles.VINE);
             } else if (t == Tiles.CORRUPT_GRASS && world.tile(x, y - 1) == Tiles.AIR && rnd.nextInt(150) < 3) {
                 world.set(x, y - 1, Tiles.CORRUPT_PLANT);
+            } else if (Tiles.isMoss(t)) {
+                // moss creeps over bare stone next to it and grows little tufts
+                int nx = x + rnd.nextInt(3) - 1, ny = y + rnd.nextInt(3) - 1;
+                if (world.tile(nx, ny) == Tiles.STONE && exposedToAir(nx, ny) && rnd.nextInt(6) == 0) world.set(nx, ny, t);
+                if (world.tile(x, y - 1) == Tiles.AIR && rnd.nextInt(40) == 0) world.set(x, y - 1, Tiles.MOSS_PLANT);
             }
         }
+    }
+
+    private boolean exposedToAir(int x, int y) {
+        return world.tile(x, y - 1) == Tiles.AIR || world.tile(x - 1, y) == Tiles.AIR
+                || world.tile(x + 1, y) == Tiles.AIR || world.tile(x, y + 1) == Tiles.AIR;
     }
 
     // ---- camera ----------------------------------------------------------

@@ -22,6 +22,8 @@ final class ItemArt {
     static final int[] MOLTEN = {0x3a0a04, 0x9a2008, 0xe05010, 0xff9a30, 0xffe080};
     static final int[] MINING = {0x4a3a10, 0x9a7a20, 0xd8b040, 0xf0d870, 0xfff4c0};
     static final int[] GRASSR = {0x1a3a0c, 0x3a7a1c, 0x5aa82c, 0x86cc40, 0xc0f080};
+    static final int[] ARCANE = {0x1e1036, 0x42227a, 0x6a3ab0, 0x9a6ad8, 0xd0b0ff};
+    static final int[] ICER = {0x1e3a5a, Pal.ICE_D, Pal.ICE, Pal.ICE_L, 0xf4fcff};
 
     private static Sprite ramped(int[] m, String... rows) {
         return Sprite.ascii(map('o', m[0], 'd', m[1], 'm', m[2], 'l', m[3], 'h', m[4]), rows);
@@ -516,6 +518,7 @@ final class ItemArt {
         I[Items.FURNACE] = Tiles.furn[Tiles.FURNACE][0].fit(15);
         I[Items.IRON_ANVIL] = Tiles.furn[Tiles.ANVIL][0];
         buildV3();
+        buildV4();
 
         for (int i = 1; i < Items.COUNT; i++) {
             if (I[i] == null) I[i] = new Sprite(8, 8);
@@ -526,7 +529,7 @@ final class ItemArt {
                 Items.RED_BRICK, Items.DIRT_WALL, Items.STONE_WALL, Items.WOOD_WALL, Items.GLASS_WALL,
                 Items.GRAY_BRICK_WALL, Items.RED_BRICK_WALL, Items.MUD, Items.EBONSTONE, Items.EBONSAND, Items.ASH,
                 Items.OBSIDIAN, Items.OBSIDIAN_BRICK, Items.HELLSTONE_BRICK, Items.MAHOGANY_WALL, Items.OBSIDIAN_BRICK_WALL,
-                Items.HELLSTONE_BRICK_WALL}) {
+                Items.HELLSTONE_BRICK_WALL, Items.SNOW_BLOCK, Items.ICE_BLOCK, Items.BOREAL_WALL}) {
             Items.SMALL[id] = shrink(I[id], 6);
         }
         for (int id : new int[]{Items.COPPER_COIN, Items.SILVER_COIN, Items.GOLD_COIN, Items.PLATINUM_COIN})
@@ -618,6 +621,190 @@ final class ItemArt {
         I[Items.MAHOGANY_WALL] = wallIcon(Tiles.W_MAHOGANY, Pal.MAHO_L);
         I[Items.OBSIDIAN_BRICK_WALL] = wallIcon(Tiles.W_OBSIDIAN_BRICK, Pal.OBS_L);
         I[Items.HELLSTONE_BRICK_WALL] = wallIcon(Tiles.W_HELLSTONE_BRICK, Pal.HELL);
+    }
+
+    // ---- version 0.4 ------------------------------------------------------------
+
+    /** Colour ramp (outline, dark, mid, light, highlight) around a base colour. */
+    static int[] ramp(int c) {
+        return new int[]{Pal.shade(c, 80), Pal.shade(c, 160), c, Pal.lerp(c, 0xffffff, 0.35), Pal.lerp(c, 0xffffff, 0.75)};
+    }
+
+    private static Sprite gem(int c) {
+        return ramped(ramp(c),
+                "..oooo..",
+                ".ohhlmo.",
+                "ohllmmdo",
+                "olmmmmdo",
+                ".odmmdo.",
+                "..oddo..",
+                "...oo...");
+    }
+
+    /** A staff: a rod with a gem in a claw at the top. */
+    private static Sprite staff(int[] metal, int gemColor) {
+        Sprite s = new Sprite(13, 13);
+        bar(s, 1.0, 12.0, 8.2, 4.8, 2.0, metal[1], metal[2], metal[3]);
+        int[] g = ramp(gemColor);
+        for (int y = 0; y < 13; y++)
+            for (int x = 0; x < 13; x++) {
+                double dx = x + 0.5 - 9.6, dy = y + 0.5 - 3.4;
+                double d = Math.hypot(dx, dy);
+                if (d > 2.7) continue;
+                s.set(x, y, d > 2.0 ? g[1] : dx + dy < -1.2 ? g[4] : dx + dy < 0.4 ? g[3] : g[2]);
+            }
+        // claw around the gem
+        s.set(7, 4, metal[3]);
+        s.set(6, 3, metal[2]);
+        s.set(9, 7, metal[1]);
+        s.set(10, 7, metal[2]);
+        s.set(8, 6, metal[2]);
+        return s.outlined(metal[0]);
+    }
+
+    private static Sprite starIcon(int c, int light, int outline) {
+        Sprite s = new Sprite(11, 11);
+        for (int y = 0; y < 11; y++)
+            for (int x = 0; x < 11; x++) {
+                double dx = x + 0.5 - 5.5, dy = y + 0.5 - 5.8;
+                double d = Math.hypot(dx, dy);
+                double a = Math.atan2(dy, dx) + Math.PI / 2;
+                double edge = 5.2 * (0.42 + 0.58 * Math.pow(Math.abs(Math.cos(a * 2.5)), 2.2));
+                if (d > edge) continue;
+                s.set(x, y, d < 1.6 ? 0xffffff : dx + dy < -0.5 ? light : c);
+            }
+        return s.outlined(outline);
+    }
+
+    private static void buildV4() {
+        Sprite[] I = Items.ICON;
+        int[] gems = {Pal.RUBY, Pal.SAPPHIRE, Pal.EMERALD, Pal.TOPAZ};
+        for (int k = 0; k < 4; k++) I[Items.RUBY + k] = gem(gems[k]);
+        I[Items.FLAME_STAFF] = staff(COPPER, Pal.RUBY);
+        I[Items.TIDE_STAFF] = staff(IRON, Pal.SAPPHIRE);
+        I[Items.QUAKE_STAFF] = staff(SILVER, Pal.EMERALD);
+        I[Items.STORM_STAFF] = staff(GOLD, Pal.TOPAZ);
+        I[Items.FALLEN_STAR] = starIcon(0xffd84a, 0xfff6b0, 0x8a5a10);
+        I[Items.MANA_CRYSTAL] = starIcon(Pal.MANA, Pal.MANA_L, Pal.MANA_D);
+        I[Items.MANA_POTION] = bottle(0x2a5ae0, 0x7aa8ff);
+        Sprite band = ring(0x3a6af0, 0x9ac0ff, 0x1a2a7a).copy();
+        band.set(4, 1, 0xffffff);
+        band.set(5, 1, 0xfff07a);
+        band.set(4, 0, 0xfff07a);
+        I[Items.BAND_STARPOWER] = band;
+        I[Items.ARCANE_HAT] = Sprite.ascii(map('o', ARCANE[0], 'd', ARCANE[1], 'm', ARCANE[2], 'l', ARCANE[3],
+                'h', ARCANE[4], 'y', 0xe8c030),
+                "........oo..",
+                ".......ohdo.",
+                "......ohmo..",
+                ".....olmdo..",
+                "....olmmdo..",
+                "...olmmmdo..",
+                "...oyyyyyo..",
+                "..olmmmmmdo.",
+                ".olmmmmmmmdo",
+                "oooooooooooo");
+        Sprite mirror = Sprite.ascii(map('o', 0x3e4452, 'f', SILVER[2], 'F', SILVER[3], 'g', 0x9ad8f0, 'G', 0xe0f8ff,
+                'd', 0x5a8ab0, 'h', HANDLE),
+                "..oooo..",
+                ".ofFFfo.",
+                "ofGGgdfo",
+                "oFGgggfo",
+                "ofggddfo",
+                "ofgdddfo",
+                ".ofddfo.",
+                "..offo..",
+                "...oho..",
+                "...oho..",
+                "...oho..",
+                "....o...");
+        I[Items.MAGIC_MIRROR] = mirror;
+        I[Items.SUSPICIOUS_EYE] = Sprite.ascii(map('o', 0x5a1a1a, 'w', 0xece4e0, 'v', 0xd06060, 'b', 0x3a6ab0,
+                'k', 0x101018, 'W', 0xffffff),
+                "...oooo...",
+                ".oowwwvoo.",
+                "owvwbbbwwo",
+                "owwbkkbbvo",
+                "ovwbkWbbwo",
+                "owwbbbbwwo",
+                ".oowvwwoo.",
+                "...oooo...");
+        I[Items.UNHOLY_ARROW] = arrow(0x5a4a7a, 0xb070ff);
+        Sprite shield = Sprite.ascii(map('o', 0x2a1a10, 'r', 0x8a5a30, 'R', 0xb07c48, 'w', 0xece4e0, 'b', 0xa02828,
+                'k', 0x101018, 'i', 0x3a6ab0),
+                "..ooooooo..",
+                ".oRRRRRRro.",
+                "oRrrrrrrrro",
+                "oRrwwwwwrro",
+                "oRwwiiiwwro",
+                "oRwikkkiwro",
+                "oRwwiiiwwro",
+                "oRrwwbwwrro",
+                ".oRrrrrrro.",
+                "..oRrrrro..",
+                "...oRrro...",
+                "....ooo....");
+        I[Items.EYE_SHIELD] = shield;
+        I[Items.SNOW_BLOCK] = blockIcon(TileArt.sample(Tiles.SNOW));
+        I[Items.ICE_BLOCK] = blockIcon(TileArt.sample(Tiles.ICE));
+        I[Items.BOREAL_WOOD] = I[Items.WOOD].recolor(Pal.WOOD_D, Pal.BOREAL_D, Pal.WOOD, Pal.BOREAL, Pal.WOOD_L, Pal.BOREAL_L,
+                0xc8965e, 0xc8b490, Pal.BARK, 0x5a4c3c, Pal.BARK_D, 0x3a3026);
+        I[Items.BOREAL_WALL] = wallIcon(Tiles.W_BOREAL, Pal.BOREAL_L);
+        I[Items.ICE_BLADE] = broadsword(ICER, 0x3a6ab0, 0x1a2a5a, 0x2a3a6a);
+        I[Items.ICE_SKATES] = Sprite.ascii(map('o', 0x2a2a3a, 'b', 0x8a5a30, 'B', 0xb07c48, 'l', 0xf0f0f8, 's', 0xc8d8e8,
+                'S', 0xffffff),
+                "..oooo....",
+                "..obBo....",
+                "..obBo....",
+                "..obBbo...",
+                "..obbBoo..",
+                ".obbbbbbo.",
+                "oBbbbbbbbo",
+                "oooooooooo",
+                "...l...l..",
+                "SssssssssS");
+        Sprite bliz = bottle(0, 0).copy();
+        for (int y = 4; y < 10; y++)
+            for (int x = 1; x < 7; x++)
+                if (bliz.get(x, y) != 0 && (x * 2 + y) % 4 != 0) bliz.set(x, y, (x + y) % 3 == 0 ? 0xffffff : 0xb8dcf8);
+        I[Items.BLIZZARD_BOTTLE] = bliz;
+        I[Items.ICE_CHEST] = Tiles.furn[Tiles.ICE_CHEST][0].fit(14);
+        I[Items.GRASS_SEEDS] = seedBag(0xc8a878, Pal.GRASS, Pal.GRASS_L);
+        I[Items.JUNGLE_SEEDS] = seedBag(0xb89868, Pal.JGRASS, Pal.JGRASS_L);
+        I[Items.PURIFICATION_POWDER] = Sprite.ascii(map('o', 0x3a3a4a, 'p', 0xe8e0d0, 'P', 0xffffff, 'd', 0xb8b0a0,
+                'c', 0x6ad8ff, 'r', 0x8a6a4a),
+                "c......c.",
+                "...rr....",
+                "..orro.c.",
+                ".oppPpo..",
+                "oppPpppo.",
+                "opPppdpo.",
+                "oppppddo.",
+                ".oddddo..",
+                "..oooo...");
+        I[Items.HEART] = Sprite.ascii(map('X', Pal.UI_HEART_D, 'h', Pal.UI_HEART_L, 'l', Pal.UI_HEART, 'm', 0xb82838),
+                ".XX.XX.",
+                "XhlXllX",
+                "XllllmX",
+                ".XlllX.",
+                "..XmX..",
+                "...X...");
+        I[Items.MANA_STAR] = starIcon(Pal.MANA, Pal.MANA_L, Pal.MANA_D).fit(9);
+    }
+
+    private static Sprite seedBag(int bag, int leaf, int leafL) {
+        return Sprite.ascii(map('o', Pal.shade(bag, 110), 'b', bag, 'B', Pal.lerp(bag, 0xffffff, 0.3), 'd', Pal.shade(bag, 170),
+                'g', leaf, 'G', leafL, 'k', 0x4a3a20),
+                "...G.g...",
+                "..gGg....",
+                "...okko..",
+                "..obbbo..",
+                ".oBbbbdo.",
+                "oBbbkbbdo",
+                "oBbbbbbdo",
+                "obbkbbbdo",
+                ".odddddo.",
+                "..ooooo..");
     }
 
     private static Sprite ring(int c, int l, int d) {

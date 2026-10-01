@@ -14,8 +14,18 @@ final class MobArt {
     private static final Sprite EATER = buildEater();
     private static final Sprite[] DEMON = {buildDemon(0), buildDemon(1)};
     private static final Sprite[] BUNNY = {buildBunny(0), buildBunny(1)};
-    private static final Humanoid.Look[] TOWN = new Humanoid.Look[3];
+    private static final Humanoid.Look[] TOWN = new Humanoid.Look[Mobs.COUNT];
     private static final Humanoid.Look IMP = new Humanoid.Look();
+    private static final Sprite[] BOSS_EYE = {buildBossEye(false, 0), buildBossEye(false, 1)};
+    private static final Sprite[] BOSS_MOUTH = {buildBossEye(true, 0), buildBossEye(true, 1)};
+    private static final Sprite SERVANT = buildServant();
+    private static final Sprite[] DRIPPLER = {buildDrippler(0), buildDrippler(1)};
+    private static final Sprite[] PENGUIN = {buildPenguin(0), buildPenguin(1)};
+    private static final Sprite[] ICE_BAT = {BAT[0].recolor(0x4a3448, 0x3a5a8a, 0x6a4a5a, 0x8ac0e8, 0xf0d040, 0xffffff),
+            BAT[1].recolor(0x4a3448, 0x3a5a8a, 0x6a4a5a, 0x8ac0e8, 0xf0d040, 0xffffff),
+            BAT[2].recolor(0x4a3448, 0x3a5a8a, 0x6a4a5a, 0x8ac0e8, 0xf0d040, 0xffffff)};
+    private static final Humanoid.Look BLOOD_ZOMBIE = Humanoid.zombie(0);
+    private static final Humanoid.Look FROZEN_ZOMBIE = Humanoid.zombie(1);
 
     static {
         Humanoid.Look guide = new Humanoid.Look();
@@ -24,7 +34,7 @@ final class MobArt {
         guide.shirt = 0x4a8a3a;
         guide.shirtD = 0x346a2a;
         guide.pants = 0x5a4a3a;
-        TOWN[0] = guide;
+        TOWN[Mobs.GUIDE] = guide;
         Humanoid.Look merchant = new Humanoid.Look();
         merchant.hair = 0xd8d8d8;
         merchant.hairD = 0xa8a8a8;
@@ -33,7 +43,7 @@ final class MobArt {
         merchant.shirtD = 0x5a3418;
         merchant.pants = 0x3a3a4a;
         merchant.skin = 0xe8b088;
-        TOWN[1] = merchant;
+        TOWN[Mobs.MERCHANT] = merchant;
         Humanoid.Look nurse = new Humanoid.Look();
         nurse.hair = 0xc8402a;
         nurse.hairD = 0x8a2a1a;
@@ -44,7 +54,47 @@ final class MobArt {
         nurse.pantsD = 0xc0c0cc;
         nurse.shoes = 0xd8d8e0;
         nurse.eye = 0x3a8a4a;
-        TOWN[2] = nurse;
+        TOWN[Mobs.NURSE] = nurse;
+        Humanoid.Look arcanist = new Humanoid.Look();
+        arcanist.hair = 0xe8e8f0;
+        arcanist.hairD = 0xb8b8c8;
+        arcanist.hairStyle = Humanoid.HAIR_BEARD;
+        arcanist.shirt = 0x5a2a9a;
+        arcanist.shirtD = 0x3e1a6e;
+        arcanist.pants = 0x4a2280;
+        arcanist.pantsD = 0x341660;
+        arcanist.shoes = 0x2a1a3a;
+        arcanist.eye = 0x6a3ab0;
+        arcanist.helm = ItemArt.ARCANE;
+        arcanist.pointyHat = true;
+        TOWN[Mobs.ARCANIST] = arcanist;
+        Humanoid.Look dryad = new Humanoid.Look();
+        dryad.hair = 0x7ac83a;
+        dryad.hairD = 0x4a8a24;
+        dryad.hairStyle = Humanoid.HAIR_LONG;
+        dryad.skin = 0xe8b080;
+        dryad.skinD = 0xc08458;
+        dryad.shirt = 0x3a9a44;
+        dryad.shirtD = 0x2a7032;
+        dryad.pants = 0x5aa83a;
+        dryad.pantsD = 0x3a7a24;
+        dryad.shoes = 0x6a4a2a;
+        dryad.eye = 0x2a8a3a;
+        TOWN[Mobs.DRYAD] = dryad;
+        BLOOD_ZOMBIE.skin = 0xb85a52;
+        BLOOD_ZOMBIE.skinD = 0x8a3a36;
+        BLOOD_ZOMBIE.shirt = 0x6a1a1a;
+        BLOOD_ZOMBIE.shirtD = 0x4a1010;
+        BLOOD_ZOMBIE.eye = 0xffe040;
+        BLOOD_ZOMBIE.sclera = 0xe0a0a0;
+        FROZEN_ZOMBIE.skin = 0x9ab8cc;
+        FROZEN_ZOMBIE.skinD = 0x7088a0;
+        FROZEN_ZOMBIE.hair = 0xe8f0f8;
+        FROZEN_ZOMBIE.hairD = 0xb8c8d8;
+        FROZEN_ZOMBIE.hairStyle = Humanoid.HAIR_SHORT;
+        FROZEN_ZOMBIE.shirt = 0x4a6ea8;
+        FROZEN_ZOMBIE.shirtD = 0x34507e;
+        FROZEN_ZOMBIE.eye = 0x9ae0ff;
         IMP.skin = 0xa0406a;
         IMP.skinD = 0x7a2a4a;
         IMP.hair = 0x2a1020;
@@ -57,6 +107,148 @@ final class MobArt {
         IMP.pants = 0x3a0e24;
         IMP.pantsD = 0x2a0818;
         IMP.shoes = 0x1a0810;
+    }
+
+    /** The Eye of Cthulhu facing right: a huge veined eyeball (or a toothed mouth) trailing tendrils. */
+    private static Sprite buildBossEye(boolean mouth, int frame) {
+        int w = 66, h = 46;
+        double cx = 43, cy = 23, r = 19.5;
+        Sprite s = new Sprite(w, h);
+        for (int k = 0; k < 6; k++) {
+            double baseY = cy - 11 + k * 4.4;
+            double phase = k * 1.3 + frame * 1.1;
+            for (int i = 0; i < 28; i++) {
+                double x = cx - r + 5 - i;
+                double y = baseY + Math.sin(i * 0.33 + phase) * (0.8 + i * 0.07) + (k - 2.5) * i * 0.1;
+                double th = 1.9 - i * 0.055;
+                int col = Pal.lerp(0xa83030, 0x5a1010, i / 28.0);
+                for (int yy = (int) Math.floor(y - th); yy <= (int) Math.ceil(y + th); yy++)
+                    for (int xx = (int) Math.floor(x - th); xx <= (int) Math.ceil(x + th); xx++)
+                        if (Math.hypot(xx + 0.5 - x, yy + 0.5 - y) <= th)
+                            s.set(xx, yy, yy + 0.5 < y - th * 0.3 ? Pal.lerp(col, 0xe06060, 0.3) : col);
+            }
+        }
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                double dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+                double d = Math.hypot(dx, dy);
+                if (d > r) continue;
+                double lit = 1 - 0.28 * ((dx + dy) / r + 0.4);
+                int c = Pal.shade(0xece4e0, (int) Math.max(150, Math.min(256, 256 * lit)));
+                if (d > r - 1.3) c = 0x7a2a2a;
+                else if (d > r * 0.55) {
+                    double ang = Math.atan2(dy, dx);
+                    double v = Math.sin(ang * 9 + Math.sin(d * 0.6) * 1.4);
+                    if (v > 0.93) c = 0xc84848;
+                    else if (v > 0.86 && d > r * 0.75) c = 0xd87070;
+                }
+                if (!mouth) {
+                    double ix = dx - 9, iy = dy;
+                    double di = Math.hypot(ix * 1.25, iy);
+                    if (di < 9.5) c = Pal.lerp(0x5a8ad0, 0x22427a, di / 9.5);
+                    if (di < 9.5 && di > 8.4) c = 0x1a2a50;
+                    if (di < 4.6) c = 0x0c0c14;
+                } else {
+                    double open = (dx - 3) * 0.78 + 1.5 - Math.abs(dy);
+                    if (dx > 2 && open > 0) {
+                        c = Pal.lerp(0x6a1414, 0x2a0606, Math.min(1, (dx - 2) / r));
+                        if (open < 2.4 && ((int) Math.floor(dx)) % 4 < 2) c = open < 1.2 ? 0xf2ead6 : 0xc8b898;
+                    } else if (dx > 1 && open > -1.6) {
+                        c = 0xb03838;
+                    }
+                }
+                s.set(x, y, c);
+            }
+        if (!mouth) {
+            s.set((int) cx + 6, (int) cy - 5, 0xffffff);
+            s.set((int) cx + 7, (int) cy - 5, 0xffffff);
+            s.set((int) cx + 6, (int) cy - 4, 0xe0ecff);
+        }
+        s.set((int) (cx - 7), (int) (cy - 12), 0xffffff);
+        s.set((int) (cx - 6), (int) (cy - 13), 0xf8f8ff);
+        return s;
+    }
+
+    private static Sprite buildServant() {
+        Sprite s = new Sprite(15, 11);
+        double cx = 10, cy = 5.5, r = 4.6;
+        for (int k = 0; k < 2; k++)
+            for (int i = 0; i < 7; i++) {
+                int y = (int) Math.round(cy - 1 + k * 2 + Math.sin(i * 0.9 + k) * 0.7);
+                s.set((int) (cx - r) - i + 1, y, i < 3 ? 0xa02828 : 0x7a1a1a);
+            }
+        for (int y = 0; y < s.h; y++)
+            for (int x = 0; x < s.w; x++) {
+                double dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+                double d = Math.hypot(dx, dy);
+                if (d > r) continue;
+                int c = d > r - 1 ? 0x8a3a3a : dx + dy > 2.5 ? 0xc8bcb8 : 0xece4e0;
+                double di = Math.hypot(dx - 1.8, dy);
+                if (di < 2.2) c = di < 1.1 ? 0x101018 : 0x3a6ab0;
+                s.set(x, y, c);
+            }
+        s.set((int) cx + 1, (int) cy - 2, 0xffffff);
+        return s;
+    }
+
+    private static Sprite buildDrippler(int f) {
+        java.util.Map<Character, Integer> m = new java.util.HashMap<>();
+        m.put('r', 0x7a1414);
+        m.put('R', 0xb02a2a);
+        m.put('L', 0xd04a44);
+        m.put('w', 0xf0e8e0);
+        m.put('k', 0x101010);
+        m.put('d', 0x5a0a0a);
+        String[][] fr = {
+            {"................",
+             "....rrrrrrr.....",
+             "..rrLLRRRRRrr...",
+             ".rRLwkRRRRwkRr..",
+             ".rRRkkRRRRkkRRr.",
+             "rRRRRRRRRRRRRRr.",
+             "rRRRwkRRRRRRRRr.",
+             "rRRRkkRRwkRRRRr.",
+             ".rRRRRRRkkRRRr..",
+             ".rrRRRRRRRRRrr..",
+             "..rrrRRRRRrrr...",
+             "...r..rRr..r....",
+             "...r...r...r....",
+             "...d...r...d....",
+             ".......d........",
+             "................"},
+            {"................",
+             "................",
+             "....rrrrrrr.....",
+             "..rrLLRRRRRrr...",
+             ".rRLwkRRRRwkRr..",
+             ".rRRkkRRRRkkRRr.",
+             "rRRRRRRRRRRRRRr.",
+             "rRRRwkRRRRRRRRr.",
+             "rRRRkkRRwkRRRRr.",
+             ".rRRRRRRkkRRRr..",
+             ".rrRRRRRRRRRrr..",
+             "..rrrRRRRRrrr...",
+             "..r...rRr...r...",
+             "..d....r....d...",
+             ".......r........",
+             ".......d........"}};
+        return Sprite.ascii(m, fr[f]);
+    }
+
+    private static Sprite buildPenguin(int f) {
+        java.util.Map<Character, Integer> m = new java.util.HashMap<>();
+        m.put('k', 0x1e2230);
+        m.put('K', 0x3a4258);
+        m.put('w', 0xf4f6fa);
+        m.put('g', 0xc8ccd8);
+        m.put('e', 0xffffff);
+        m.put('y', 0xf0a020);
+        String[][] fr = {
+            {"..kkkk..", ".kKkkkk.", ".kkkkeky", ".kkkkkyy", "kKkkkwww", "kkkkwwww", "kkkkwwgw", ".kkkwwgw",
+             "..kkwwg.", "..yy.yy."},
+            {"..kkkk..", ".kKkkkk.", ".kkkkeky", ".kkkkkyy", ".Kkkkwww", "kKkkwwww", "kkkkwwgw", ".kkkwwgw",
+             "..kkwwg.", "...yyyy."}};
+        return Sprite.ascii(m, fr[f]);
     }
 
     private static Sprite buildHornet(int f) {
@@ -265,8 +457,36 @@ final class MobArt {
                 s.drawFx(spr, sx, sy, m.dir < 0, light, 256, 0xffffff, flash);
                 return;
             }
-            case Mobs.FIRE_IMP: case Mobs.GUIDE: case Mobs.MERCHANT: case Mobs.NURSE: {
-                Humanoid.Look look = m.type == Mobs.FIRE_IMP ? IMP : TOWN[m.type - Mobs.GUIDE];
+            case Mobs.EYE_OF_CTHULHU: {
+                double cx = m.x + m.w / 2.0 - camX, cy = m.y + m.h / 2.0 - camY;
+                Sprite[] spr = m.ai[3] > 0 ? BOSS_MOUTH : BOSS_EYE;
+                int lit = Pal.lerp(light, 0xffffff, 0.35);
+                s.drawRotated(spr[(int) (ticks / 9 % 2)], 43, 23, cx, cy, m.rot, false, flashed(lit, flash));
+                return;
+            }
+            case Mobs.SERVANT: {
+                double cx = m.x + m.w / 2.0 - camX, cy = m.y + m.h / 2.0 - camY;
+                s.drawRotated(SERVANT, 10, 5.5, cx, cy, m.rot, false, flashed(Pal.lerp(light, 0xffffff, 0.2), flash));
+                return;
+            }
+            case Mobs.DRIPPLER: {
+                int bob = (int) Math.round(Math.sin(m.anim * 0.08) * 1.5);
+                s.drawFx(DRIPPLER[(int) (ticks / 20 % 2)], sx - 1, sy - 1 + bob, m.dir < 0, Pal.lerp(light, 0xffffff, 0.15),
+                        256, 0xffffff, flash);
+                return;
+            }
+            case Mobs.PENGUIN: {
+                int f = m.onGround && Math.abs(m.vx) > 0.1 ? (int) (m.anim * 0.6) % 2 : 0;
+                s.drawFx(PENGUIN[f], sx, sy, m.dir < 0, light, 256, 0xffffff, flash);
+                return;
+            }
+            case Mobs.ICE_BAT: {
+                int f = (int) ((ticks / 5 + m.variant) % 4);
+                s.drawFx(ICE_BAT[f == 3 ? 1 : f], sx, sy, m.dir < 0, light, 256, 0xffffff, flash);
+                return;
+            }
+            case Mobs.FIRE_IMP: case Mobs.GUIDE: case Mobs.MERCHANT: case Mobs.NURSE: case Mobs.ARCANIST: case Mobs.DRYAD: {
+                Humanoid.Look look = m.type == Mobs.FIRE_IMP ? IMP : TOWN[m.type];
                 int c = sx + m.w / 2;
                 boolean casting = m.type == Mobs.FIRE_IMP && m.attackTimer > 230;
                 double arm = casting ? 2.4 : m.onGround ? Math.sin(m.anim) * 0.5 : 0.6;
@@ -289,7 +509,8 @@ final class MobArt {
                 slime(s, m, sx, sy, light, flash);
                 break;
             case Mobs.AI_FIGHTER: {
-                Humanoid.Look look = m.type == Mobs.SKELETON ? SKELETON_LOOK : ZOMBIE_LOOK[m.variant & 1];
+                Humanoid.Look look = m.type == Mobs.SKELETON ? SKELETON_LOOK : m.type == Mobs.BLOOD_ZOMBIE ? BLOOD_ZOMBIE
+                        : m.type == Mobs.FROZEN_ZOMBIE ? FROZEN_ZOMBIE : ZOMBIE_LOOK[m.variant & 1];
                 int c = sx + m.w / 2;
                 double reach = 1.35 + Math.sin(m.anim * 0.5) * 0.08;
                 Humanoid.drawBody(s, c, sy, m.dir, look, m.anim, m.onGround, reach + 0.1, light, flash);

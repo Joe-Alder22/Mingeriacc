@@ -74,6 +74,7 @@ final class Entities {
         double gravity;
         boolean glow;       // drawn as light (ignores darkness)
         boolean noCollide;
+        boolean settle;     // comes to rest and fades where it lands (snowflakes, leaves)
         int size = 1;
         double drag = 1;
 
@@ -96,9 +97,15 @@ final class Entities {
             if (!noCollide && w.solid((int) Math.floor(x / Tiles.T), (int) Math.floor(y / Tiles.T))) {
                 x -= vx;
                 y -= vy;
-                vx *= -0.3;
-                vy *= -0.3;
-                life -= 2;
+                if (settle) {
+                    vx = vy = gravity = 0;
+                    noCollide = true;
+                    life = Math.min(life, 50);
+                } else {
+                    vx *= -0.3;
+                    vy *= -0.3;
+                    life -= 2;
+                }
             }
             return --life > 0;
         }

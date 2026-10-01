@@ -14,7 +14,8 @@ final class Renderer {
 
     final Background bg = new Background();
     private final Screen layer = new Screen(16, 16);
-    private final int[] extra = new int[4 * 8];
+    private int[] extra = new int[4 * 32];
+    private int extraCount;
     private int[] grid = new int[0];     // light colour per tile
     private int[] corner = new int[0];   // light colour per tile corner
     private int gx0, gy0, gw, gh;
@@ -33,6 +34,7 @@ final class Renderer {
         if (g.camY + s.h * 0.6 >= w.underworld * T) b = Background.UNDERWORLD;
         else if (b == Background.UNDERWORLD) b = Background.FOREST;
         bg.setBiome(b, biome < 0);
+        bg.bloodMoon = w.bloodMoon;
         biome = b;
         bg.hellRefY = (w.underworld + (w.h - w.underworld) * 0.45) * T - s.h / 2.0;
         bg.draw(s, w.time, g.camX, g.camY, camSpawnY, frameTicks);
@@ -63,6 +65,16 @@ final class Renderer {
             }
     }
 
+    private void addLight(double wx, double wy, int level, int color) {
+        if (extra.length < (extraCount + 1) * 4) extra = java.util.Arrays.copyOf(extra, extra.length * 2);
+        int i = extraCount * 4;
+        extra[i] = (int) Math.floor(wx / T);
+        extra[i + 1] = (int) Math.floor(wy / T);
+        extra[i + 2] = level;
+        extra[i + 3] = color;
+        extraCount++;
+    }
+
     /** Light colour of the tile at a world pixel position. */
     int lightAt(double wx, double wy) {
         int x = (int) Math.floor(wx / T) - gx0, y = (int) Math.floor(wy / T) - gy0;
@@ -78,24 +90,27 @@ final class Renderer {
         int tx0 = Math.floorDiv(cx, T), ty0 = Math.floorDiv(cy, T);
         int tx1 = Math.floorDiv(cx + s.w - 1, T), ty1 = Math.floorDiv(cy + s.h - 1, T);
 
-        // lights
-        int n = 0;
+        // lights: a held torch, the mining helmet, magic, stars and lightning
+        extraCount = 0;
         int held = g.inv.selectedItem();
-        if (held == Items.TORCH && !g.hidePlayer && !g.player.dead) {
-            extra[0] = (int) (g.player.centerX() / T);
-            extra[1] = (int) ((g.player.y + 6) / T);
-            extra[2] = 14;
-            extra[3] = Tiles.TORCH_LIGHT;
-            n = 1;
+        if (held == Items.TORCH && !g.hidePlayer && !g.player.dead)
+            addLight(g.player.centerX(), g.player.y + 6, 14, Tiles.TORCH_LIGHT);
+        if (g.player.headLight && !g.hidePlayer && !g.player.dead)
+            addLight(g.player.centerX() + g.player.dir * 6, g.player.y + 2, 13, 0xfff4d8);
+        for (Projectile pr : g.projectiles) {
+            int lv = pr.lightLevel();
+            if (lv > 0) addLight(pr.x, pr.y, lv, pr.lightColor());
         }
-        if (g.player.headLight && !g.hidePlayer && !g.player.dead) {
-            extra[n * 4] = (int) ((g.player.centerX() + g.player.dir * 6) / T);
-            extra[n * 4 + 1] = (int) ((g.player.y + 2) / T);
-            extra[n * 4 + 2] = 13;
-            extra[n * 4 + 3] = 0xfff4d8;
-            n++;
+        for (Drop d : g.drops) {
+            if (d.item == Items.FALLEN_STAR) addLight(d.x + 3, d.y + 3, 9, 0xfff0b0);
+            else if (d.item == Items.MANA_STAR) addLight(d.x + 3, d.y + 3, 6, 0x8ab0ff);
         }
-        g.light.compute(w, tx0, ty0, tx1, ty1, g.skyLevel(), extra, n);
+        for (Magic.Bolt b : g.bolts) {
+            if (b.life < b.maxLife / 3) continue;
+            addLight(b.xs[0], b.ys[0], 12, 0xd8e8ff);
+            addLight(b.xs[b.xs.length - 1], b.ys[b.ys.length - 1], 15, 0xd8e8ff);
+        }
+        g.light.compute(w, tx0, ty0, tx1, ty1, g.skyLevel(), extra, extraCount);
         skyTint = Background.sunTint(w.time);
         buildLight(g, tx0, ty0, tx1, ty1);
 
@@ -105,30 +120,40 @@ final class Renderer {
         anyGlass = false;
         long anim = g.ticks;
         int bgx = (int) Math.floor(g.camX * 0.55), bgy = (int) Math.floor(g.camY * 0.55);
+        layer.mask = LIT;
+        // backgrounds first (walls and the cave backdrop): a furniture object spans
+        // several cells, and the backgrounds of its later cells must not cover it
         for (int ty = ty0; ty <= ty1; ty++) {
             if (ty < 0 || ty >= w.h) continue;
             for (int tx = tx0; tx <= tx1; tx++) {
                 if (tx < 0 || tx >= w.w) continue;
                 int t = w.tile(tx, ty);
+                boolean solid = Tiles.SOLID[t] && !Tiles.TRANSPARENT[t];
+                if (solid && w.solid(tx, ty - 1) && w.solid(tx, ty + 1) && w.solid(tx - 1, ty) && w.solid(tx + 1, ty))
+                    continue; // covered by its tile
                 int wl = w.wall(tx, ty);
+                int sx = tx * T - cx, sy = ty * T - cy;
+                if (wl != 0) {
+                    drawWall(w, tx, ty, wl, sx, sy);
+                    int ws = g.wallCrackStage(tx, ty);
+                    if (ws > 0) layer.draw(Tiles.cracks[ws - 1], sx, sy, false, 256);
+                } else if (ty >= w.surfaceLevel && ty < w.underworld) {
+                    drawBackdrop(w, tx, ty, sx, sy, bgx, bgy, g.biome);
+                }
+            }
+        }
+        // then the tiles, plants and furniture
+        for (int ty = ty0; ty <= ty1; ty++) {
+            if (ty < 0 || ty >= w.h) continue;
+            for (int tx = tx0; tx <= tx1; tx++) {
+                if (tx < 0 || tx >= w.w) continue;
+                int t = w.tile(tx, ty);
+                if (t == Tiles.AIR) continue;
                 int sx = tx * T - cx, sy = ty * T - cy;
                 boolean solid = Tiles.SOLID[t] && !Tiles.TRANSPARENT[t];
                 boolean up = !w.solid(tx, ty - 1), dn = !w.solid(tx, ty + 1);
                 boolean lf = !w.solid(tx - 1, ty), rt = !w.solid(tx + 1, ty);
-                boolean covered = solid && !up && !dn && !lf && !rt;
                 int h = Noise.hash(tx, ty);
-
-                layer.mask = LIT;
-                if (!covered) {
-                    if (wl != 0) {
-                        drawWall(w, tx, ty, wl, sx, sy);
-                        int ws = g.wallCrackStage(tx, ty);
-                        if (ws > 0) layer.draw(Tiles.cracks[ws - 1], sx, sy, false, 256);
-                    } else if (ty >= w.surfaceLevel && ty < w.underworld) {
-                        drawBackdrop(w, tx, ty, sx, sy, bgx, bgy, g.biome);
-                    }
-                }
-                if (t == Tiles.AIR) continue;
                 if (Tiles.TRANSPARENT[t]) {
                     anyGlass = true;
                     continue;
@@ -137,7 +162,7 @@ final class Renderer {
                     int ox = w.originX(tx, ty), oy = w.originY(tx, ty);
                     if (tx == Math.max(ox, tx0) && ty == Math.max(oy, ty0)) drawFurniture(w, t, ox, oy, cx, cy, anim);
                 } else if (solid) {
-                    drawSolid(w, t, tx, ty, sx, sy, up, dn, lf, rt, h);
+                    drawSolid(w, t, tx, ty, sx, sy, up, dn, lf, rt, h, anim);
                 } else {
                     drawDecor(w, t, tx, ty, sx, sy, h, anim);
                 }
@@ -317,6 +342,7 @@ final class Renderer {
             int k = ty * T + y >= border ? 1 : 0;
             if (biome == Background.JUNGLE) k = 2;
             else if (biome == Background.CORRUPTION) k = 3;
+            else if (biome == Background.SNOW) k = 4;
             Sprite tex = Tiles.caveBack[k];
             int v = (dy + bgy) & 63;
             for (int x = 0; x < T; x++) {
@@ -327,9 +353,23 @@ final class Renderer {
         }
     }
 
-    private void drawSolid(World w, int t, int tx, int ty, int sx, int sy, boolean up, boolean dn, boolean lf, boolean rt, int h) {
+    /** Gem colours (dark, mid, light, highlight); gem pixels glow in the dark. */
+    private static final int[][] GEM = new int[Tiles.COUNT][];
+
+    static {
+        for (int t = Tiles.RUBY; t <= Tiles.TOPAZ; t++) {
+            int c = Tiles.COLOR[t];
+            GEM[t] = new int[]{Pal.shade(c, 120), c, Pal.lerp(c, 0xffffff, 0.4), Pal.lerp(c, 0xffffff, 0.8)};
+        }
+    }
+
+    private void drawSolid(World w, int t, int tx, int ty, int sx, int sy, boolean up, boolean dn, boolean lf, boolean rt,
+                           int h, long anim) {
         int edge = Tiles.EDGE[t];
         boolean grass = Tiles.isGrass(t);
+        int[] moss = Tiles.MOSS[t];
+        int[] gem = GEM[t];
+        boolean twinkle = gem != null && ((anim / 5 + (h & 63)) % 48) < 3;
         int gHL = Pal.GRASS_HL, gL = Pal.GRASS_L, gM = Pal.GRASS, gD = Pal.GRASS_D;
         if (t == Tiles.JUNGLE_GRASS) {
             gHL = 0xaae060; gL = Pal.JGRASS_L; gM = Pal.JGRASS; gD = Pal.JGRASS_D;
@@ -368,7 +408,23 @@ final class Renderer {
                     else if (bD != 0 && y >= T - depth) src = bD;
                     if (src != 0) c = Tiles.texel(src, h, x, y, wx, wy);
                 }
-                if (grass) {
+                if (gem != null) {
+                    int k = c & 0xffffff;
+                    if (k == (gem[0] & 0xffffff) || k == (gem[1] & 0xffffff) || k == (gem[2] & 0xffffff) || k == (gem[3] & 0xffffff)) {
+                        // gems shine faintly by themselves, and twinkle now and then
+                        int glow = twinkle && k == (gem[3] & 0xffffff) ? 0xffffff : Pal.shade(k, 170);
+                        layer.px[dx + dy * layer.w] = glow | EMISSIVE;
+                        continue;
+                    }
+                }
+                if (moss != null) {
+                    int hx = Noise.hash(wx, 23), hy = Noise.hash(wy, 29);
+                    int dTop = 2 + (hx & 1), dSide = 1 + (hy & 1), dBot = 1 + ((hx >> 2) & 1);
+                    if (up && y < dTop) c = y == 0 ? ((hx >> 4 & 1) == 0 ? moss[1] : moss[0]) : moss[2];
+                    else if (dn && y >= T - dBot) c = moss[3];
+                    else if ((lf && x < dSide) || (rt && x >= T - dSide)) c = (hy >> 3 & 1) == 0 ? moss[2] : moss[3];
+                    else if ((top && up) || (bottom && dn) || (left && lf) || (right && rt)) c = edge;
+                } else if (grass) {
                     int hx = Noise.hash(wx, 17);
                     int depth = 2 + (hx & 1) + ((hx >> 3 & 3) == 0 ? 1 : 0);
                     if (up && y < depth) {
@@ -380,6 +436,8 @@ final class Renderer {
                     } else if (up && y == depth && (hx >> 7 & 1) == 0) {
                         c = Pal.DIRT_DD;
                     }
+                } else if (t == Tiles.SNOW && top && up) {
+                    c = Pal.SNOW_L;
                 } else if ((top && up) || (bottom && dn) || (left && lf) || (right && rt)) {
                     c = edge;
                 } else if (up && y == 1) {
@@ -390,13 +448,23 @@ final class Renderer {
                 layer.px[dx + dy * layer.w] = c & 0xffffff | LIT;
             }
         }
-        // blades of grass sticking up
-        if (grass && up && w.tile(tx, ty - 1) == Tiles.AIR) {
+        // blades of grass (or moss) sticking up
+        if ((grass || moss != null) && up && w.tile(tx, ty - 1) == Tiles.AIR) {
+            int bl = moss != null ? moss[1] : gL, bm = moss != null ? moss[2] : gM;
             for (int x = 0; x < T; x++) {
                 int hx = Noise.hash(wx0 + x, 31);
                 if ((hx & 3) != 0) continue;
                 int bh = 1 + ((hx >> 2) & 1);
-                for (int k = 1; k <= bh; k++) layer.pset(sx + x, sy - k, k == bh ? gL : gM);
+                for (int k = 1; k <= bh; k++) layer.pset(sx + x, sy - k, k == bh ? bl : bm);
+            }
+        }
+        // moss hangs a little from ceilings
+        if (moss != null && dn && w.tile(tx, ty + 1) == Tiles.AIR) {
+            for (int x = 0; x < T; x++) {
+                int hx = Noise.hash(wx0 + x, 37);
+                if ((hx & 7) != 0) continue;
+                layer.pset(sx + x, sy + T, moss[3]);
+                if ((hx >> 3 & 1) == 0) layer.pset(sx + x, sy + T + 1, Pal.shade(moss[3], 200));
             }
         }
     }
@@ -435,15 +503,18 @@ final class Renderer {
                 layer.mask = LIT;
                 break;
             }
-            case Tiles.TRUNK: case Tiles.MAHOGANY_TRUNK: case Tiles.EBON_TRUNK: {
+            case Tiles.TRUNK: case Tiles.MAHOGANY_TRUNK: case Tiles.EBON_TRUNK: case Tiles.BOREAL_TRUNK: {
                 boolean base = !Tiles.isTrunk(w.tile(tx, ty + 1));
-                Sprite[] bases = t == Tiles.MAHOGANY_TRUNK ? Tiles.trunkBaseMaho : t == Tiles.EBON_TRUNK ? Tiles.trunkBaseEbon : Tiles.trunkBase;
+                Sprite[] bases = t == Tiles.MAHOGANY_TRUNK ? Tiles.trunkBaseMaho : t == Tiles.EBON_TRUNK ? Tiles.trunkBaseEbon
+                        : t == Tiles.BOREAL_TRUNK ? Tiles.trunkBaseBoreal : Tiles.trunkBase;
                 layer.draw(base ? bases[h & 3] : Tiles.tex[t][h & 3], sx, sy, false, 256);
                 break;
             }
-            case Tiles.LEAVES: case Tiles.MAHOGANY_LEAVES: case Tiles.EBON_LEAVES: {
-                int leafL = t == Tiles.LEAVES ? Pal.LEAF_L : t == Tiles.MAHOGANY_LEAVES ? Pal.JGRASS_L : Pal.CGRASS_L;
-                int leafD = t == Tiles.LEAVES ? Pal.LEAF_D : t == Tiles.MAHOGANY_LEAVES ? 0x2a5a14 : 0x2e2448;
+            case Tiles.LEAVES: case Tiles.MAHOGANY_LEAVES: case Tiles.EBON_LEAVES: case Tiles.BOREAL_LEAVES: {
+                int leafL = t == Tiles.LEAVES ? Pal.LEAF_L : t == Tiles.MAHOGANY_LEAVES ? Pal.JGRASS_L
+                        : t == Tiles.BOREAL_LEAVES ? 0xeef4ff : Pal.CGRASS_L;
+                int leafD = t == Tiles.LEAVES ? Pal.LEAF_D : t == Tiles.MAHOGANY_LEAVES ? 0x2a5a14
+                        : t == Tiles.BOREAL_LEAVES ? 0x163028 : 0x2e2448;
                 Sprite tex = Tiles.tex[t][h & 3];
                 boolean up = !Tiles.isLeaves(w.tile(tx, ty - 1)), dn = !Tiles.isLeaves(w.tile(tx, ty + 1));
                 int l = w.tile(tx - 1, ty), r = w.tile(tx + 1, ty);
@@ -471,6 +542,12 @@ final class Renderer {
                     }
                 break;
             }
+            case Tiles.MOSS_PLANT: {
+                int below = w.tile(tx, ty + 1);
+                Sprite[] v = Tiles.isMoss(below) ? Tiles.mossPlant[below - Tiles.GREEN_MOSS] : Tiles.tex[t];
+                layer.draw(v[h & (v.length - 1)], sx, sy, false, 256);
+                break;
+            }
             default: {
                 Sprite[] v = Tiles.tex[t];
                 layer.draw(v[h & (v.length - 1)], sx, sy, false, 256);
@@ -487,9 +564,14 @@ final class Renderer {
             if (Items.isCoin(d.item)) ic = ItemArt.coinFrame(d.item, (int) ((d.age / 6 + d.x) % 4));
             int l = lightAt(d.x + 3, d.y + 3);
             l = Pal.lerp(l, 0xffffff, 0.12);
-            if (d.item == Items.TORCH) l = 0xffffff;
-            int bob = (int) Math.round(Math.sin((d.age + d.x) * 0.08) * 1.0);
+            boolean glowing = d.item == Items.FALLEN_STAR || Items.KIND[d.item] == Items.K_PICKUP;
+            if (d.item == Items.TORCH || glowing) l = 0xffffff;
+            int bob = (int) Math.round(Math.sin((d.age + d.x) * (glowing ? 0.12 : 0.08)) * (glowing ? 1.5 : 1.0));
             int dx = (int) Math.round(d.x) - cx + 3 - ic.w / 2, dy = (int) Math.round(d.y) - cy + 6 - ic.h + bob;
+            if (glowing) {
+                int gc = d.item == Items.HEART ? 0xff4050 : d.item == Items.MANA_STAR ? 0x5a8aff : 0xfff0a0;
+                s.glow(dx + ic.w / 2.0, dy + ic.h / 2.0, 7, gc, (int) (70 + 30 * Math.sin(d.age * 0.1)));
+            }
             s.drawLit(ic, dx, dy, false, l);
             if (Items.isCoin(d.item) && (g.ticks / 8 + (int) d.x) % 20 == 0) s.padd(dx + 2, dy + 1, 0xffffff, 200);
         }
@@ -498,7 +580,7 @@ final class Renderer {
         for (Mob m : g.mobs) {
             int l = lightAt(m.centerX(), m.centerY());
             MobArt.draw(s, m, cx, cy, l, g.ticks);
-            if (m.life < m.lifeMax && !m.dead) {
+            if (m.life < m.lifeMax && !m.dead && !Mobs.BOSS[m.type]) {
                 int bw = Math.max(12, m.w + 2), bx = (int) Math.round(m.centerX()) - cx - bw / 2;
                 int by = (int) Math.round(m.y + m.h) - cy + 3;
                 double f = Math.max(0, m.life / (double) m.lifeMax);
@@ -523,6 +605,17 @@ final class Renderer {
 
         // projectiles
         for (Projectile pr : g.projectiles) pr.draw(s, cx, cy, lightAt(pr.x, pr.y));
+
+        // lightning
+        for (Magic.Bolt b : g.bolts) {
+            double f = b.life / (double) b.maxLife;
+            for (int i = 0; i + 1 < b.xs.length; i++) {
+                double x0 = b.xs[i] - cx, y0 = b.ys[i] - cy, x1 = b.xs[i + 1] - cx, y1 = b.ys[i + 1] - cy;
+                s.glow((x0 + x1) / 2, (y0 + y1) / 2, 6, 0x6a8aff, (int) (70 * f));
+                s.line(x0, y0, x1, y1, 0xffffff, (int) (256 * Math.min(1, f * 1.5)));
+                s.line(x0 + 1, y0, x1 + 1, y1, 0xa8c8ff, (int) (150 * f));
+            }
+        }
 
         // particles
         for (Particle pa : g.particles) {

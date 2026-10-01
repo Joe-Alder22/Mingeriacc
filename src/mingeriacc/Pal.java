@@ -124,6 +124,29 @@ final class Pal {
     static final int OBS = 0x2a2040;
     static final int OBS_L = 0x4a3a6a;
 
+    // Snow and ice
+    static final int SNOW_D = 0xb4c2da;
+    static final int SNOW = 0xdce6f4;
+    static final int SNOW_L = 0xf6faff;
+    static final int ICE_D = 0x5a90c8;
+    static final int ICE = 0x8ac0ec;
+    static final int ICE_L = 0xc8e8ff;
+    static final int BOREAL_D = 0x4a3e30;
+    static final int BOREAL = 0x76644e;
+    static final int BOREAL_L = 0x9e8a6c;
+
+    // Gems
+    static final int RUBY = 0xe02a48;
+    static final int SAPPHIRE = 0x2a6ae8;
+    static final int EMERALD = 0x22c060;
+    static final int TOPAZ = 0xf0b020;
+
+    // Mana and magic
+    static final int MANA = 0x3a6af0;
+    static final int MANA_L = 0x8ab4ff;
+    static final int MANA_D = 0x1a2a8a;
+    static final int STAR = 0xfff07a;
+
     // Liquids
     static final int WATER = 0x2860c8;
     static final int WATER_L = 0x6aa8f0;
@@ -166,6 +189,9 @@ final class Pal {
     static final int UI_CRIT = 0xff5a1a;
     static final int UI_HURT = 0xff4a4a;
     static final int UI_HEAL = 0x5aff7a;
+    static final int UI_MANA = 0x6a9aff;
+    static final int UI_BOSS = 0xb064ff;
+    static final int UI_EVENT = 0xff5a4a;
 
     // Item rarity colours (name colours)
     static final int[] RARITY = {0xf0f0f6, 0x9696ff, 0x96ff96, 0xffc896, 0xff9696, 0xff96ff};

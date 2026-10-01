@@ -1,12 +1,12 @@
 package mingeriacc;
 
-/** A creature in the world (enemy). Behaviour and looks are in Mobs and MobArt. */
+/** A creature in the world (enemy, critter, boss or town folk). Behaviour and looks are in Mobs and MobArt. */
 final class Mob extends Body {
     final int type;
     int life, lifeMax, damage, defense;
     double kbRes;              // 1 = full knockback, 0 = none
     int dir = 1;
-    final double[] ai = new double[4];
+    final double[] ai = new double[6];
     int timer;
     int hitFlash;              // frames of white flash after a hit
     int lastSwing = -1;        // swing that last hit (one hit per swing)
@@ -16,8 +16,10 @@ final class Mob extends Body {
     double rot;                // drawing rotation (flyers)
     int variant;
     int offscreen;             // frames spent far away
-    int onFire, poisoned;      // debuff frames left
+    int onFire, poisoned, frostburn; // debuff frames left
     int attackTimer;
+    int bash;                  // frames spent pushing against a closed door
+    int jumpWait;              // frames until the next jump towards a platform
     // town folk
     int homeX = -1, homeY = -1;
     String name = "";
@@ -35,5 +37,6 @@ final class Mob extends Body {
         defense = Mobs.DEFENSE[type];
         kbRes = Mobs.KB_RES[type];
         hurtTimer = 1000;
+        noClip = Mobs.NO_CLIP[type];
     }
 }

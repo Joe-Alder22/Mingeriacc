@@ -248,6 +248,17 @@ final class Screen {
         }
     }
 
+    /** A one-pixel line blended with alpha a (0..256). */
+    void line(double x0, double y0, double x1, double y1, int c, int a) {
+        int steps = (int) Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)));
+        for (int i = 0; i <= steps; i++) {
+            double t = steps == 0 ? 0 : i / (double) steps;
+            int x = (int) Math.floor(x0 + (x1 - x0) * t), y = (int) Math.floor(y0 + (y1 - y0) * t);
+            if (a >= 256) pset(x, y, c);
+            else pblend(x, y, c, a);
+        }
+    }
+
     /** Thick line at the given angle (0 = straight down), used for limbs. */
     void limb(double x0, double y0, double angle, double len, int thick, int color) {
         double dx = Math.sin(angle), dy = Math.cos(angle);

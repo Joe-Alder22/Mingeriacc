@@ -36,10 +36,10 @@ import java.util.Properties;
  */
 public final class Main {
     static final String TITLE = "Mingeriacc";
-    static final String VERSION = "0.3.0";
+    static final String VERSION = "0.4.0";
     static final int TPS = 60;
 
-    enum State { TITLE, WORLDS, CREATE, GENERATING, PLAYING, SETTINGS, HELP }
+    enum State { TITLE, CHARACTERS, NEW_CHARACTER, WORLDS, CREATE, GENERATING, PLAYING, SETTINGS, HELP }
 
     JFrame frame;
     Canvas canvas;
@@ -55,6 +55,11 @@ public final class Main {
     State returnState = State.TITLE; // where Settings and Help return to
     Game game;
     File gameFile;
+    /** The character chosen in the menu. */
+    Profile profile;
+    /** Developer cheat menu in the inventory, and its mining speed. */
+    boolean cheats;
+    double miningSpeed = 1;
     boolean paused;
     boolean fullscreen, showFps;
     int zoom = 1; // 0 = near, 1 = normal, 2 = far
@@ -86,6 +91,12 @@ public final class Main {
         showFps = "1".equals(settings.getProperty("fps", "0"));
         zoom = Math.max(0, Math.min(2, num("zoom", 1)));
         renderer.smoothLight = !"retro".equals(settings.getProperty("lighting", "smooth"));
+        cheats = "1".equals(settings.getProperty("cheats", "0"));
+        try {
+            miningSpeed = Math.max(1, Math.min(20, Double.parseDouble(settings.getProperty("mining_speed", "1"))));
+        } catch (NumberFormatException e) {
+            miningSpeed = 1;
+        }
         Ui.audio = audio;
 
         SwingUtilities.invokeAndWait(this::createWindow);
@@ -110,6 +121,9 @@ public final class Main {
         settings.setProperty("fps", showFps ? "1" : "0");
         settings.setProperty("zoom", "" + zoom);
         settings.setProperty("lighting", renderer.smoothLight ? "smooth" : "retro");
+        settings.setProperty("cheats", cheats ? "1" : "0");
+        if (game != null) miningSpeed = game.miningSpeed;
+        settings.setProperty("mining_speed", "" + miningSpeed);
         SaveIO.saveSettings(settings);
     }
 
@@ -305,7 +319,7 @@ public final class Main {
             showFps = !showFps;
             saveSettings();
         }
-        if (input.pressed(KeyEvent.VK_M) && first && state != State.CREATE) {
+        if (input.pressed(KeyEvent.VK_M) && first && state != State.CREATE && state != State.NEW_CHARACTER) {
             audio.musicMuted = !audio.musicMuted;
             saveSettings();
             if (game != null) game.message(audio.musicMuted ? "Music off" : "Music on", Pal.UI_DIM);
@@ -319,6 +333,8 @@ public final class Main {
         if (paused) return;
         game.viewW = screen.w;
         game.viewH = screen.h;
+        hud.cheats = cheats;
+        if (!cheats) game.godMode = false;
         boolean uiBlocks = hud.update(game, input, screen.w, screen.h);
         game.update(input, uiBlocks);
         if (game.saveRequested) {
@@ -330,11 +346,18 @@ public final class Main {
     }
 
     static int musicFor(Game g) {
+        Mob boss = Boss.active(g);
+        if (boss != null && Math.abs(boss.centerX() - g.player.centerX()) < g.viewW * 1.5
+                && Math.abs(boss.centerY() - g.player.centerY()) < g.viewH * 1.5) return Music.BOSS;
         switch (g.biome) {
             case Background.UNDERWORLD: return Music.UNDERWORLD;
             case Background.JUNGLE: return Music.JUNGLE;
             case Background.CORRUPTION: return Music.CORRUPTION;
-            default: return g.isUnderground() ? Music.CAVE : g.isNight() ? Music.NIGHT : Music.DAY;
+            default:
+                if (g.isUnderground()) return Music.CAVE;
+                if (g.world.bloodMoon && g.isNight()) return Music.BLOOD_MOON;
+                if (g.biome == Background.SNOW) return Music.SNOW;
+                return g.isNight() ? Music.NIGHT : Music.DAY;
         }
     }
 
@@ -420,6 +443,7 @@ public final class Main {
     void startGame(Game g, File file) {
         game = g;
         gameFile = file;
+        g.miningSpeed = miningSpeed;
         paused = false;
         state = State.PLAYING;
         input.consumeClicks();
@@ -429,7 +453,8 @@ public final class Main {
         if (game == null || gameFile == null) return false;
         try {
             SaveIO.save(game, gameFile);
-            if (announce) game.message("World saved", Pal.UI_GOOD);
+            SaveIO.savePlayer(game);
+            if (announce) game.message("World and character saved", Pal.UI_GOOD);
             return true;
         } catch (IOException e) {
             game.message("Saving failed: " + e.getMessage(), Pal.UI_BAD);
@@ -440,6 +465,7 @@ public final class Main {
 
     void exitToTitle() {
         saveGame(false);
+        miningSpeed = game.miningSpeed;
         game = null;
         gameFile = null;
         paused = false;

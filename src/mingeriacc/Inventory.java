@@ -79,6 +79,7 @@ final class Inventory {
     }
 
     boolean canAccept(int item) {
+        if (Items.KIND[item] == Items.K_PICKUP) return true;
         int max = Items.MAX_STACK[item];
         for (int i = 0; i < SIZE; i++) {
             if (id[i] == 0) return true;
@@ -182,7 +183,21 @@ final class Inventory {
     void clear() {
         java.util.Arrays.fill(id, 0);
         java.util.Arrays.fill(count, 0);
+        java.util.Arrays.fill(armor, 0);
+        java.util.Arrays.fill(acc, 0);
         trashId = trashCount = 0;
+    }
+
+    Inventory copy() {
+        Inventory o = new Inventory();
+        System.arraycopy(id, 0, o.id, 0, SIZE);
+        System.arraycopy(count, 0, o.count, 0, SIZE);
+        System.arraycopy(armor, 0, o.armor, 0, armor.length);
+        System.arraycopy(acc, 0, o.acc, 0, acc.length);
+        o.selected = selected;
+        o.trashId = trashId;
+        o.trashCount = trashCount;
+        return o;
     }
 
     void giveStarterKit() {

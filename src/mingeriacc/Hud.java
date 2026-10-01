@@ -12,14 +12,19 @@ final class Hud {
     private static final int CRAFT_COLS = 10, CRAFT_ROWS = 3;
 
     // what the mouse is over
-    private static final int NONE = 0, INV = 1, TRASH = 2, RECIPE = 3, CHEST = 4, SHOP = 5, ARMOR = 6, ACC = 7;
+    private static final int NONE = 0, INV = 1, TRASH = 2, RECIPE = 3, CHEST = 4, SHOP = 5, ARMOR = 6, ACC = 7, CHEAT = 8;
     private int hoverKind, hoverIndex = -1;
     private final List<Recipes.Recipe> recipes = new ArrayList<>();
     private int craftScroll;
     private int holdTimer;
     private int recipeTimer;
-    private int screenW = 640;
+    private int screenW = 640, screenH = 360;
     private static final Sprite HEART = heart();
+    private static final Sprite STAR = manaStar();
+    /** The developer menu (every item, mining speed, god mode) is shown in the inventory. */
+    boolean cheats;
+    private int cheatScroll;
+    private static final int[] CHEAT_ITEMS = cheatItems();
 
     static int slotX(int i) { return X0 + (i % 10) * STEP; }
     static int slotY(int i) { return Y0 + (i / 10) * STEP + (i >= 10 ? 6 : 0); }
@@ -31,6 +36,27 @@ final class Hud {
 
     private int equipX() { return screenW - 8 - SLOT; }
     private int equipY(int i) { return 76 + i * STEP + (i >= 3 ? 8 : 0); }
+
+    // the cheat panel sits between the inventory and the equipment column
+    private static int cheatX() { return X0 + 10 * STEP + 34; }
+    private static final int CHEAT_Y = 52, CHEAT_GRID_Y = CHEAT_Y + 34;
+    // (it leaves room for the "Defense" label above the equipment and for a boss bar at the bottom)
+    private int cheatCols() { return Math.max(1, (equipX() - 54 - cheatX()) / STEP); }
+    private int cheatRows() { return Math.max(1, (screenH - CHEAT_GRID_Y - 34) / STEP); }
+
+    private static int[] cheatItems() {
+        int n = 0;
+        for (int i = 1; i < Items.COUNT; i++) if (Items.KIND[i] != Items.K_PICKUP) n++;
+        int[] out = new int[n];
+        n = 0;
+        for (int i = 1; i < Items.COUNT; i++) if (Items.KIND[i] != Items.K_PICKUP) out[n++] = i;
+        return out;
+    }
+
+    /** The shop of the town dweller being talked to, or null. */
+    private static int[] shop(Game g) {
+        return g.talkTo != null && g.shopOpen ? Town.shop(g.talkTo.type) : null;
+    }
 
     private static boolean inRect(int mx, int my, int x, int y, int w, int h) {
         return mx >= x && my >= y && mx < x + w && my < y + h;
@@ -52,6 +78,26 @@ final class Hud {
         m.put('h', Pal.UI_HEART_L);
         m.put('l', Pal.UI_HEART);
         m.put('m', 0xb82838);
+        return Sprite.ascii(m, rows);
+    }
+
+    private static Sprite manaStar() {
+        String[] rows = {
+            "....X....",
+            "...XlX...",
+            "XXXXllXXX",
+            "XhllllmmX",
+            ".XhllmmX.",
+            "..XlllX..",
+            ".XllXmmX.",
+            ".XmX.XmX.",
+            ".XX...XX.",
+        };
+        java.util.Map<Character, Integer> m = new java.util.HashMap<>();
+        m.put('X', Pal.MANA_D);
+        m.put('h', Pal.MANA_L);
+        m.put('l', Pal.MANA);
+        m.put('m', 0x2a48c0);
         return Sprite.ascii(m, rows);
     }
 
@@ -85,12 +131,25 @@ final class Hud {
                 hoverIndex = i < 3 ? i : i - 3;
                 return;
             }
+        if (cheats) {
+            int cols = cheatCols(), rows = cheatRows();
+            for (int k = 0; k < cols * rows; k++) {
+                int i = k + cheatScroll * cols;
+                if (i >= CHEAT_ITEMS.length) break;
+                if (inRect(mx, my, cheatX() + (k % cols) * STEP, CHEAT_GRID_Y + (k / cols) * STEP, SLOT, SLOT)) {
+                    hoverKind = CHEAT;
+                    hoverIndex = i;
+                    return;
+                }
+            }
+        }
         int cy = craftY();
+        int[] shop = shop(g);
         if (g.openChest != null) {
             for (int i = 0; i < World.Chest.SIZE; i++)
                 if (inRect(mx, my, X0 + (i % 10) * STEP, cy + (i / 10) * STEP, SLOT, SLOT)) { hoverKind = CHEST; hoverIndex = i; return; }
-        } else if (g.shopOpen) {
-            for (int i = 0; i < Town.MERCHANT_SHOP.length; i++)
+        } else if (shop != null) {
+            for (int i = 0; i < shop.length; i++)
                 if (inRect(mx, my, X0 + (i % 10) * STEP, cy + (i / 10) * STEP, SLOT, SLOT)) { hoverKind = SHOP; hoverIndex = i; return; }
         } else {
             for (int k = 0; k < CRAFT_COLS * CRAFT_ROWS; k++) {
@@ -108,6 +167,7 @@ final class Hud {
     /** Handles the mouse in the UI; returns true if the mouse is over the UI. */
     boolean update(Game g, Input in, int screenWidth, int screenHeight) {
         screenW = screenWidth;
+        screenH = screenHeight;
         int mx = in.mouseX, my = in.mouseY;
         if (g.player.dead) {
             hoverKind = NONE;
@@ -127,6 +187,14 @@ final class Hud {
                     && inRect(mx, my, X0 - 4, cy - 4, CRAFT_COLS * STEP + 8, CRAFT_ROWS * STEP + 8)) {
                 craftScroll += in.wheel > 0 ? 1 : -1;
                 refreshRecipes(g);
+            }
+            if (cheats) {
+                int pw = cheatCols() * STEP + 4;
+                boolean overPanel = inRect(mx, my, cheatX() - 4, CHEAT_Y - 4, pw + 4, screenH - CHEAT_Y);
+                over |= overPanel;
+                int rows = (CHEAT_ITEMS.length + cheatCols() - 1) / cheatCols();
+                if (in.wheel != 0 && overPanel)
+                    cheatScroll = Math.max(0, Math.min(Math.max(0, rows - cheatRows()), cheatScroll + (in.wheel > 0 ? 1 : -1)));
             }
         } else {
             over |= inRect(mx, my, X0 - 2, Y0 - 2, 10 * STEP + 2, SLOT + 4);
@@ -214,7 +282,18 @@ final class Hud {
             case SHOP:
                 if (in.clickL) {
                     if (g.cursorItem != 0) sellCursor(g);
-                    else g.buy(Town.MERCHANT_SHOP[hoverIndex]);
+                    else g.buy(shop(g)[hoverIndex]);
+                    in.consumeClicks();
+                }
+                break;
+            case CHEAT:
+                if (in.clickL || in.clickR) {
+                    int item = CHEAT_ITEMS[hoverIndex];
+                    if (g.cursorItem == 0 || g.cursorItem == item) {
+                        g.cursorItem = item;
+                        g.cursorCount = in.clickR ? Math.min(Items.MAX_STACK[item], g.cursorCount + 1) : Items.MAX_STACK[item];
+                        g.audio.play(Audio.TICK, 0.3, 1.3);
+                    }
                     in.consumeClicks();
                 }
                 break;
@@ -388,7 +467,7 @@ final class Hud {
         int px = (screenW - pw) / 2, py = 60;
         List<String> lines = Font.wrap(g.talkText, pw - 16);
         int ph = 30 + lines.size() * 10 + 24;
-        String action = m.type == Mobs.GUIDE ? "Help" : m.type == Mobs.MERCHANT ? "Shop"
+        String action = m.type == Mobs.GUIDE ? "Help" : Town.shop(m.type) != null ? "Shop"
                 : "Heal (" + Items.money(Town.healCost(g.player)) + ")";
         int bw = Font.width(action) + 16;
         int bx1 = px + 8, bx2 = bx1 + bw + 6, by = py + ph - 22;
@@ -406,7 +485,7 @@ final class Hud {
         Mob m = g.talkTo;
         if (m == null) return;
         if (m.type == Mobs.GUIDE) g.talkText = Town.guideTip(g);
-        else if (m.type == Mobs.MERCHANT) {
+        else if (Town.shop(m.type) != null) {
             g.shopOpen = true;
             if (!g.inventoryOpen) g.toggleInventory();
         } else g.nurseHeal();
@@ -440,6 +519,7 @@ final class Hud {
 
     void draw(Screen s, Game g, Input in) {
         screenW = s.w;
+        screenH = s.h;
         Inventory inv = g.inv;
         // name of the selected item
         int sel = inv.selectedItem();
@@ -458,9 +538,10 @@ final class Hud {
 
         drawLife(s, g);
         drawBreath(s, g);
+        boolean bossBar = drawBossBar(s, g);
 
-        // messages
-        int my = s.h - 14;
+        // messages (above the boss bar when there is one)
+        int my = s.h - 14 - (bossBar ? 26 : 0);
         for (int i = g.messages.size() - 1; i >= 0; i--) {
             Game.Message m = g.messages.get(i);
             int c = m.life > 40 ? m.color : Pal.lerp(Pal.BLACK, m.color, m.life / 40.0);
@@ -496,7 +577,8 @@ final class Hud {
                 case CHEST: item = g.openChest != null ? g.openChest.id[hoverIndex] : 0; break;
                 case ARMOR: item = inv.armor[hoverIndex]; break;
                 case ACC: item = inv.acc[hoverIndex]; break;
-                case SHOP: item = Town.MERCHANT_SHOP[hoverIndex]; shop = true; break;
+                case SHOP: item = shop(g) != null ? shop(g)[hoverIndex] : 0; shop = true; break;
+                case CHEAT: item = CHEAT_ITEMS[hoverIndex]; break;
                 case RECIPE:
                     if (hoverIndex < recipes.size()) {
                         rec = recipes.get(hoverIndex);
@@ -565,12 +647,13 @@ final class Hud {
             smallButton(s, in, "Loot all", X0, by, 70);
             smallButton(s, in, "Deposit all", X0 + 76, by, 80);
             s.textShadow("Shift + click: move", X0 + 164, by + 3, Pal.UI_DIM);
-        } else if (g.shopOpen) {
+        } else if (shop(g) != null) {
+            int[] shop = shop(g);
             s.textShadow("Shop", X0 + 1, cy - 11, Pal.UI_TEXT);
             s.textShadow("(shift + click to sell)", X0 + 30, cy - 11, Pal.UI_DIM);
-            for (int i = 0; i < Town.MERCHANT_SHOP.length; i++)
-                drawSlot(s, X0 + (i % 10) * STEP, cy + (i / 10) * STEP, Town.MERCHANT_SHOP[i], 1, false,
-                        hoverKind == SHOP && hoverIndex == i, inv.money() < Items.VALUE[Town.MERCHANT_SHOP[i]]);
+            for (int i = 0; i < shop.length; i++)
+                drawSlot(s, X0 + (i % 10) * STEP, cy + (i / 10) * STEP, shop[i], 1, false,
+                        hoverKind == SHOP && hoverIndex == i, inv.money() < Items.VALUE[shop[i]]);
         } else {
             StringBuilder near = new StringBuilder();
             for (int t : new int[]{Tiles.WORKBENCH, Tiles.FURNACE, Tiles.ANVIL})
@@ -594,6 +677,57 @@ final class Hud {
             }
             if (recipes.isEmpty()) s.textShadow("Gather materials to see recipes", X0 + 4, cy + 6, Pal.UI_DIM);
         }
+        if (cheats) drawCheats(s, g, in);
+    }
+
+    /** The developer menu: every item in the game, mining speed, god mode and the time of day. */
+    private void drawCheats(Screen s, Game g, Input in) {
+        int x = cheatX(), cols = cheatCols(), rows = cheatRows();
+        int pw = cols * STEP + 4;
+        s.panel(x - 4, CHEAT_Y - 4, pw + 4, Math.min(screenH - CHEAT_Y, rows * STEP + 42));
+        s.textShadow("Cheats", x, CHEAT_Y, Pal.UI_SEL);
+        String ms = String.format(java.util.Locale.ROOT, "Mining %.1fx", g.miningSpeed);
+        s.textShadow(ms, x + 42, CHEAT_Y, Pal.UI_TEXT);
+        g.miningSpeed = Ui.slider(s, in, x + 42, CHEAT_Y + 11, 90, g.miningSpeed, 1, 20, 0.5);
+        int bx = x + 142;
+        if (Ui.button(s, in, g.godMode ? "God: on" : "God: off", bx, CHEAT_Y - 1, 58, 14)) g.godMode = !g.godMode;
+        if (Ui.button(s, in, g.isNight() ? "Make day" : "Make night", bx + 62, CHEAT_Y - 1, 64, 14))
+            g.world.time = g.isNight() ? 7.5 : 19.6;
+        if (Ui.button(s, in, "Full", bx, CHEAT_Y + 15, 58, 14)) {
+            g.player.life = g.player.lifeMax;
+            g.player.mana = g.player.manaCap();
+            g.player.potionSickness = 0;
+        }
+        int total = (CHEAT_ITEMS.length + cols - 1) / cols;
+        if (total > rows) {
+            String sc = (cheatScroll + 1) + "/" + (total - rows + 1);
+            s.textShadow(sc, bx + 62 + 64 - Font.width(sc), CHEAT_Y + 18, Pal.UI_DIM);
+        }
+        for (int k = 0; k < cols * rows; k++) {
+            int i = k + cheatScroll * cols;
+            if (i >= CHEAT_ITEMS.length) break;
+            drawSlot(s, x + (k % cols) * STEP, CHEAT_GRID_Y + (k / cols) * STEP, CHEAT_ITEMS[i], 1, false,
+                    hoverKind == CHEAT && hoverIndex == i, false);
+        }
+    }
+
+    /** Health bar of a boss being fought, at the bottom of the screen. Returns true if drawn. */
+    private boolean drawBossBar(Screen s, Game g) {
+        Mob b = Boss.active(g);
+        if (b == null || g.player.dead) return false;
+        if (Math.abs(b.centerX() - g.player.centerX()) > s.w * 1.5 || Math.abs(b.centerY() - g.player.centerY()) > s.h * 1.5)
+            return false;
+        int bw = Math.min(220, s.w - 60), bx = (s.w - bw) / 2, by = s.h - 16;
+        double f = Math.max(0, b.life / (double) b.lifeMax);
+        s.fillRound(bx - 2, by - 2, bw + 4, 10, Pal.BLACK, 200);
+        s.fill(bx, by, bw, 6, 0x3a1020);
+        int fw = (int) Math.ceil(bw * f);
+        s.fill(bx, by, fw, 6, Pal.lerp(0xc02a2a, 0xe05050, 0.3));
+        s.fill(bx, by, fw, 2, 0xff8a8a);
+        s.rectRound(bx - 2, by - 2, bw + 4, 10, Pal.UI_BOSS);
+        String name = Mobs.NAME[b.type] + "  " + Math.max(0, b.life) + "/" + b.lifeMax;
+        s.textCenter(name, s.w / 2, by - 11, Pal.UI_BOSS);
+        return true;
     }
 
     private static void smallButton(Screen s, Input in, String label, int x, int y, int w) {
@@ -615,7 +749,11 @@ final class Hud {
             s.textShadow("On fire!", X0 + 1, y, 0xff9a40);
             y += 10;
         }
-        if (p.poisoned > 0) s.textShadow("Poisoned", X0 + 1, y, 0x9ae060);
+        if (p.poisoned > 0) {
+            s.textShadow("Poisoned", X0 + 1, y, 0x9ae060);
+            y += 10;
+        }
+        if (p.chilled > 0) s.textShadow("Chilled", X0 + 1, y, Pal.ICE_L);
     }
 
     /** Bubbles above the head while diving. */
@@ -651,12 +789,29 @@ final class Hud {
             s.drawFx(HEART, x, y, false, 0x505060, 150, 0, 0);
             if (fill > 0) s.drawFx(HEART, x, y, false, 0xffffff, (int) (60 + fill * 196), 0, 0);
         }
-        int ly = y0 + ((hearts - 1) / perRow + 1) * 10 + 4;
+        int ly = y0 + ((hearts - 1) / perRow + 1) * 10 + 1;
+        // mana stars below the hearts
+        int stars = p.manaCap() / 20;
+        int sx0 = s.w - stars * hw - 8;
+        String mt = "Mana " + p.mana;
+        s.textShadow(mt, sx0 - Font.width(mt) - 4, ly + 1, Pal.UI_MANA);
+        for (int i = 0; i < stars; i++) {
+            int x = sx0 + i * hw + 1;
+            double fill = Math.max(0, Math.min(1, (p.mana - i * 20) / 20.0));
+            s.drawFx(STAR, x, ly, false, 0x505060, 150, 0, 0);
+            if (fill > 0) s.drawFx(STAR, x, ly, false, 0xffffff, (int) (60 + fill * 196), 0, 0);
+        }
+        ly += 13;
         if (g.inventoryOpen) return; // the equipment column is there
         String clock = g.clockText();
         String depth = g.depthText();
         s.textShadow(clock, s.w - Font.width(clock) - 8, ly, Pal.UI_TEXT);
         s.textShadow(depth, s.w - Font.width(depth) - 8, ly + 11, Pal.UI_DIM);
+        World w = g.world;
+        String event = w.bloodMoon && g.isNight() ? "Blood Moon"
+                : w.slimeRain ? "Slime Rain " + w.slimeRainKills + "/" + Events.SLIME_RAIN_GOAL : null;
+        if (event != null)
+            s.textShadow(event, s.w - Font.width(event) - 8, ly + 22, w.bloodMoon ? Pal.UI_EVENT : Events.SLIME_RAIN_COLOR);
     }
 
     private void tooltip(Screen s, int mx, int my, int item, Recipes.Recipe r, Inventory inv, boolean shop, Game g) {
@@ -666,8 +821,13 @@ final class Hud {
         cols.add(Pal.RARITY[Items.RARITY[item]]);
         int kind = Items.KIND[item];
         if (Items.DAMAGE[item] > 0 && kind != Items.K_AMMO) {
-            lines.add(Items.DAMAGE[item] + (Items.STYLE[item] == Items.S_SHOOT ? " ranged damage" : " melee damage"));
+            lines.add(Items.DAMAGE[item] + (Items.isMagic(item) ? " magic damage" : Items.STYLE[item] == Items.S_SHOOT
+                    ? " ranged damage" : " melee damage"));
             cols.add(Pal.UI_TEXT);
+            if (Items.isMagic(item)) {
+                lines.add("Uses " + Items.MANA[item] + " mana");
+                cols.add(Pal.UI_MANA);
+            }
             double spd = Items.USE_TIME[item];
             String speed = spd <= 15 ? "Fast speed" : spd <= 22 ? "Average speed" : "Slow speed";
             lines.add(speed + ", " + knockText(Items.KNOCK[item]));

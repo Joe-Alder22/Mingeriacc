@@ -6,6 +6,9 @@ import java.util.Random;
 final class WorldGen {
     static final String[] SIZE_NAMES = {"Small", "Medium", "Large"};
     static final int[][] SIZES = {{1400, 500}, {2400, 700}, {3600, 1000}};
+    /** Amounts that can be set when creating a world (1 = normal). */
+    static final String[] ORE_NAMES = {"Copper", "Iron", "Silver", "Gold", "Demonite", "Hellstone", "Gems"};
+    static final int COPPER = 0, IRON = 1, SILVER = 2, GOLD = 3, DEMONITE = 4, HELLSTONE = 5, GEMS = 6;
 
     /** Generation progress, readable from another thread. */
     static final class Progress {
@@ -21,6 +24,9 @@ final class WorldGen {
     private final Progress progress;
     private final int W, H;
     private int[] surf, rock;
+    private double[] ore = {1, 1, 1, 1, 1, 1, 1};
+    /** Adding gems and moss to a world from an older version: only untouched rock is changed. */
+    private boolean retrofit;
 
     private WorldGen(World world, Progress progress) {
         this.world = world;
@@ -34,13 +40,41 @@ final class WorldGen {
     }
 
     static World generate(String name, int sizeIndex, long seed, Progress p) {
+        return generate(name, sizeIndex, seed, p, null);
+    }
+
+    /** oreAmounts: multipliers in the order of ORE_NAMES (null = all normal). */
+    static World generate(String name, int sizeIndex, long seed, Progress p, double[] oreAmounts) {
         int[] s = SIZES[sizeIndex];
         World w = new World(s[0], s[1]);
         w.name = name;
         w.seed = seed;
         w.sizeIndex = sizeIndex;
-        new WorldGen(w, p).run();
+        long id = new Random().nextLong();
+        w.id = id == 0 ? 1 : id;
+        WorldGen gen = new WorldGen(w, p);
+        if (oreAmounts != null) gen.ore = oreAmounts.clone();
+        gen.run();
         return w;
+    }
+
+    /**
+     * Brings a world made by an older version up to date: gems in unbroken rock
+     * and moss on natural cave stone deep down. Returns the number of gem tiles.
+     */
+    static int retrofit(World w) {
+        WorldGen gen = new WorldGen(w, null);
+        gen.retrofit = true;
+        int before = gen.countGems();
+        gen.gems();
+        gen.moss();
+        return gen.countGems() - before;
+    }
+
+    private int countGems() {
+        int n = 0;
+        for (byte b : world.tiles) if (Tiles.isGem(b & 0xff)) n++;
+        return n;
     }
 
     private void stage(String s, double v) {
@@ -53,10 +87,13 @@ final class WorldGen {
     private void run() {
         stage("Shaping the terrain", 0.02);
         terrain();
+        planBiomes();
         stage("Laying down layers", 0.1);
         layers();
         stage("Growing the jungle", 0.16);
         jungle();
+        stage("Freezing the snowlands", 0.18);
+        snow();
         stage("Spreading the corruption", 0.2);
         corruption();
         stage("Digging caves", 0.25);
@@ -67,8 +104,12 @@ final class WorldGen {
         underworld();
         stage("Scattering ores", 0.62);
         ores();
+        stage("Hiding gems", 0.65);
+        gems();
         stage("Growing grass", 0.68);
         grass();
+        stage("Growing moss", 0.7);
+        moss();
         world.updateAllSky();
         stage("Planting trees", 0.72);
         trees();
@@ -84,8 +125,122 @@ final class WorldGen {
         world.updateAllSky();
         stage("Settling the water", 0.96);
         world.liquids.settle(300);
+        world.removeFloatingTrees();
         spawn();
         stage("Done", 1.0);
+    }
+
+    // ---- snow ------------------------------------------------------------------
+
+    private int jungleSide = 1;
+    private int snowL = -1, snowR = -1;
+
+    /** Decides where the big biomes go: the jungle on one side, the snow between it and the spawn. */
+    private void planBiomes() {
+        jungleSide = rnd.nextBoolean() ? 1 : -1;
+        int center = (int) (W / 2 + jungleSide * W * 0.13);
+        int half = (int) (W * 0.045) + 6;
+        snowL = center - half;
+        snowR = center + half;
+    }
+
+    private boolean inSnow(int x, int y) {
+        if (snowL < 0) return false;
+        double wob = noise3.noise(y / 26.0 + 77) * 10;
+        if (x < snowL + wob || x > snowR + wob) return false;
+        // deepest in the middle, like a valley of ice going down
+        double d = Math.abs(x - (snowL + snowR) / 2.0) / ((snowR - snowL) / 2.0);
+        int top = surf != null ? surf[Math.max(0, Math.min(W - 1, x))] : world.surfaceLevel;
+        double bottom = top + (H * 0.62 - top) * (1 - d * d * 0.65);
+        return y < bottom;
+    }
+
+    private void snow() {
+        for (int x = Math.max(0, snowL - 20); x < Math.min(W, snowR + 20); x++)
+            for (int y = Math.max(0, surf[x] - 2); y < world.underworld && y < H; y++) {
+                if (!inSnow(x, y)) continue;
+                int i = x + y * W;
+                int t = world.tiles[i] & 0xff;
+                if (t == Tiles.DIRT || t == Tiles.CLAY || t == Tiles.SAND) world.setRaw(x, y, Tiles.SNOW);
+                else if (t == Tiles.STONE && (y < rock[x] + 6 || noise2.fractal(x / 14.0 + 90, y / 14.0, 2) > -0.08))
+                    world.setRaw(x, y, Tiles.ICE);
+                int wl = world.walls[i];
+                if (wl == Tiles.W_DIRT_N) world.walls[i] = (byte) Tiles.W_SNOW_N;
+                else if (wl == Tiles.W_STONE_N) world.walls[i] = (byte) Tiles.W_ICE_N;
+            }
+    }
+
+    // ---- gems and moss ------------------------------------------------------------
+
+    /** Small clusters of rubies, sapphires, emeralds and topazes in the cavern stone. */
+    private void gems() {
+        double area = (double) W * Math.max(1, world.underworld - world.rockLevel);
+        int[] types = {Tiles.RUBY, Tiles.SAPPHIRE, Tiles.EMERALD, Tiles.TOPAZ};
+        double[] amount = {1.0, 0.85, 0.75, 0.65};
+        double[] from = {0.34, 0.38, 0.44, 0.5};
+        for (int k = 0; k < 4; k++) {
+            int n = (int) (area / 9000 * amount[k] * ore[GEMS]);
+            int top = Math.max(world.rockLevel, (int) (H * from[k]));
+            int bot = world.underworld - 8;
+            if (bot <= top) continue;
+            for (int i = 0; i < n; i++) {
+                int x = 10 + rnd.nextInt(W - 20), y = top + rnd.nextInt(bot - top);
+                gemCluster(x, y, types[k], 2 + rnd.nextInt(3));
+            }
+        }
+    }
+
+    private void gemCluster(int x, int y, int type, int size) {
+        for (int k = 0; k < size; k++) {
+            int xx = x + rnd.nextInt(3) - 1, yy = y + rnd.nextInt(3) - 1;
+            if (world.tile(xx, yy) != Tiles.STONE) continue;
+            if (retrofit && !enclosed(xx, yy)) continue;
+            world.setRaw(xx, yy, type);
+            x = xx;
+            y = yy;
+        }
+    }
+
+    /** No air around: rock nobody has dug into. */
+    private boolean enclosed(int x, int y) {
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++)
+                if (!world.solid(x + dx, y + dy)) return false;
+        return true;
+    }
+
+    /** Patches of coloured moss on the cave stone; each world has a few of the colours. */
+    private void moss() {
+        int[] all = {Tiles.GREEN_MOSS, Tiles.BROWN_MOSS, Tiles.RED_MOSS, Tiles.BLUE_MOSS, Tiles.PURPLE_MOSS};
+        Random r = new Random(world.seed * 13 + 5);
+        for (int i = all.length - 1; i > 0; i--) {
+            int j = r.nextInt(i + 1);
+            int t = all[i]; all[i] = all[j]; all[j] = t;
+        }
+        int[] kinds = {all[0], all[1], all[2]};
+        int top = world.rockLevel + 6, bot = world.underworld - 6;
+        for (int y = top; y < bot; y++)
+            for (int x = 2; x < W - 2; x++) {
+                if (world.tile(x, y) != Tiles.STONE || !exposed(x, y)) continue;
+                if (noise3.fractal(x / 55.0 + 200, y / 38.0, 2) < 0.12) continue;
+                if (retrofit) {
+                    int wl = world.wall(x, y);
+                    boolean natural = wl == 0 || Tiles.WALL_NATURAL[wl];
+                    if (!natural) continue;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        int wa = world.wall(x, y + dy);
+                        if (wa != 0 && !Tiles.WALL_NATURAL[wa]) natural = false;
+                    }
+                    if (!natural) continue;
+                }
+                double v = (noise2.noise(x / 90.0 + 50, y / 70.0) + 1) / 2;
+                int moss = kinds[Math.max(0, Math.min(2, (int) (v * 3)))];
+                if (r.nextInt(100) < 85) world.setRaw(x, y, moss);
+            }
+        for (int y = top; y < bot; y++)
+            for (int x = 2; x < W - 2; x++)
+                if (Tiles.isMoss(world.tile(x, y)) && world.tile(x, y - 1) == Tiles.AIR && world.liquidAt(x, y - 1) == 0
+                        && r.nextInt(4) == 0) world.setRaw(x, y - 1, Tiles.MOSS_PLANT);
     }
 
     // ---- biome areas -------------------------------------------------------
@@ -110,7 +265,7 @@ final class WorldGen {
 
     /** Mud, jungle grass and mahogany on one side of the spawn. */
     private void jungle() {
-        int side = rnd.nextBoolean() ? 1 : -1;
+        int side = jungleSide;
         int center = (int) (W / 2 + side * W * 0.26);
         int half = (int) (W * 0.065);
         jungleL = center - half;
@@ -180,7 +335,7 @@ final class WorldGen {
                     }
                 }
                 // demonite around the bottom
-                for (int j = 0; j < 6; j++)
+                for (int j = 0; j < (int) Math.round(6 * ore[DEMONITE]); j++)
                     runner(x + (rnd.nextDouble() - 0.5) * 16, y0 + depth + rnd.nextInt(6) - 3, 1.4, 4 + rnd.nextInt(3),
                             Tiles.DEMONITE, Tiles.EBONSTONE, Tiles.STONE, Tiles.DIRT);
             }
@@ -249,6 +404,11 @@ final class WorldGen {
                 low = Math.max(low, world.surfaceAt(x));
             }
             if (low - rim > 8) continue;
+            // trees standing where the lake goes would be left floating over the water
+            for (int x = x0 - 1; x <= x0 + w; x++) {
+                int s0 = world.surfaceAt(x);
+                if (Tiles.isTrunk(world.tile(x, s0 - 1))) world.removeTree(x, s0 - 1);
+            }
             int level = Math.max(rim, low - 1) + 1;
             int depth = 4 + rnd.nextInt(4);
             for (int x = x0 + 1; x < x0 + w - 1; x++) {
@@ -261,6 +421,11 @@ final class WorldGen {
                         world.setRaw(x, y, Tiles.AIR);
                 }
                 for (int y = level; y < level + d; y++) fillWater(x, y, Liquids.WATER);
+                if (inSnow(x, level) && d > 0) {
+                    // lakes in the snow are frozen over
+                    world.liquid[x + level * W] = 0;
+                    world.setRaw(x, level, Tiles.ICE);
+                }
                 int bottom = level + d;
                 for (int y = bottom; y < bottom + 2; y++)
                     if (Tiles.SOLID[world.tile(x, y)]) world.setRaw(x, y, inJungle(x, y) ? Tiles.MUD : Tiles.SAND);
@@ -316,9 +481,11 @@ final class WorldGen {
             if (inCorruption(x, y) || inCorruption(x + 10, y)) continue;
             boolean deep = y > world.rockLevel + 40;
             boolean jungle = inJungle(x, y);
-            int block = jungle ? Tiles.MAHOGANY_PLANKS : deep ? Tiles.GRAY_BRICK : Tiles.PLANKS;
-            int wall = jungle ? Tiles.W_MAHOGANY : deep ? Tiles.W_GRAY_BRICK : Tiles.W_WOOD;
-            house(x, y, 10, 7, block, wall, deep ? Tiles.GOLD_CHEST : Tiles.CHEST, jungle ? 2 : deep ? 1 : 0);
+            boolean snow = inSnow(x, y) || inSnow(x + 10, y);
+            int block = jungle ? Tiles.MAHOGANY_PLANKS : snow ? Tiles.BOREAL_PLANKS : deep ? Tiles.GRAY_BRICK : Tiles.PLANKS;
+            int wall = jungle ? Tiles.W_MAHOGANY : snow ? Tiles.W_BOREAL : deep ? Tiles.W_GRAY_BRICK : Tiles.W_WOOD;
+            int chest = snow ? Tiles.ICE_CHEST : deep ? Tiles.GOLD_CHEST : Tiles.CHEST;
+            house(x, y, 10, 7, block, wall, chest, jungle ? 2 : snow ? 4 : deep ? 1 : 0);
             k++;
         }
         // chests lying in caves
@@ -329,31 +496,37 @@ final class WorldGen {
             y = floorBelow(x, y, 30);
             if (y < 0 || !fits(x, y, 2, 2) || world.liquidAt(x, y) > 0) continue;
             boolean deep = y > world.rockLevel + 40;
-            world.placeFurniture(deep ? Tiles.GOLD_CHEST : Tiles.CHEST, x, y - 1, 0);
-            fillChest(x, y - 1, inJungle(x, y) ? 2 : deep ? 1 : 0);
+            boolean snow = inSnow(x, y);
+            world.placeFurniture(snow ? Tiles.ICE_CHEST : deep ? Tiles.GOLD_CHEST : Tiles.CHEST, x, y - 1, 0);
+            fillChest(x, y - 1, inJungle(x, y) ? 2 : snow ? 4 : deep ? 1 : 0);
             k++;
         }
     }
 
-    /** Loot: 0 = underground, 1 = deep (gold chest), 2 = jungle, 3 = underworld. */
+    /** Loot: 0 = underground, 1 = deep (gold chest), 2 = jungle, 3 = underworld, 4 = snow. */
     private void fillChest(int x, int y, int tier) {
         World.Chest c = new World.Chest(x, y);
         world.chests.put(x + y * W, c);
         int[][] main = {
-            {Items.HERMES_BOOTS, Items.CLOUD_BOTTLE, Items.BAND_REGEN, Items.AGLET, Items.BALLOON, Items.WOOD_BOW},
-            {Items.HORSESHOE, Items.CLOUD_BOTTLE, Items.HERMES_BOOTS, Items.BALLOON, Items.BAND_REGEN, Items.FLIPPER},
+            {Items.HERMES_BOOTS, Items.CLOUD_BOTTLE, Items.BAND_REGEN, Items.AGLET, Items.BALLOON, Items.WOOD_BOW,
+                Items.MAGIC_MIRROR},
+            {Items.HORSESHOE, Items.CLOUD_BOTTLE, Items.HERMES_BOOTS, Items.BALLOON, Items.BAND_REGEN, Items.FLIPPER,
+                Items.MAGIC_MIRROR},
             {Items.ANKLET, Items.FLIPPER, Items.AGLET, Items.BAND_REGEN},
             {Items.OBSIDIAN_SKULL, Items.HORSESHOE, Items.CLOUD_BOTTLE},
+            {Items.ICE_SKATES, Items.BLIZZARD_BOTTLE, Items.ICE_BLADE, Items.MAGIC_MIRROR},
         };
         c.add(main[tier][rnd.nextInt(main[tier].length)], 1);
         if (rnd.nextInt(3) == 0) c.add(Items.HEALING_POTION, 1 + rnd.nextInt(3));
         if (rnd.nextInt(2) == 0) c.add(Items.TORCH, 8 + rnd.nextInt(15));
         if (rnd.nextInt(3) == 0) c.add(tier == 3 ? Items.FLAMING_ARROW : Items.WOOD_ARROW, 20 + rnd.nextInt(30));
-        int[] bars = tier == 0 ? new int[]{Items.COPPER_BAR, Items.IRON_BAR} : tier == 3
+        int[] bars = tier == 0 || tier == 4 ? new int[]{Items.COPPER_BAR, Items.IRON_BAR} : tier == 3
                 ? new int[]{Items.HELLSTONE_BAR, Items.GOLD_BAR} : new int[]{Items.SILVER_BAR, Items.GOLD_BAR};
         if (rnd.nextInt(2) == 0) c.add(bars[rnd.nextInt(bars.length)], 3 + rnd.nextInt(6));
         if (tier == 2 && rnd.nextInt(2) == 0) c.add(Items.JUNGLE_SPORES, 2 + rnd.nextInt(4));
         if (tier >= 1 && rnd.nextInt(8) == 0) c.add(Items.LIFE_CRYSTAL, 1);
+        if (tier >= 1 && rnd.nextInt(3) == 0) c.add(Items.RUBY + rnd.nextInt(4), 2 + rnd.nextInt(4));
+        if (rnd.nextInt(5) == 0) c.add(Items.FALLEN_STAR, 1 + rnd.nextInt(2));
         c.add(tier == 0 ? Items.SILVER_COIN : Items.SILVER_COIN, 5 + rnd.nextInt(tier == 0 ? 20 : 60));
     }
 
@@ -427,7 +600,7 @@ final class WorldGen {
             do {
                 cx = 120 + rnd.nextInt(W - 240);
                 tries++;
-            } while (Math.abs(cx - W / 2) < 150 + dw && tries < 50);
+            } while ((Math.abs(cx - W / 2) < 150 + dw || (cx + dw / 2 + 20 > snowL && cx - dw / 2 - 20 < snowR)) && tries < 50);
             for (int x = cx - dw / 2; x < cx + dw / 2; x++) {
                 if (x < 0 || x >= W) continue;
                 double t = 1 - Math.abs(x - cx) / (dw / 2.0);
@@ -552,7 +725,8 @@ final class WorldGen {
                     double dx = xx + 0.5 - x, dy = yy + 0.5 - y;
                     if (dx * dx + dy * dy > r * r) continue;
                     int cur = world.tile(xx, yy);
-                    boolean ok = ore ? (cur == Tiles.DIRT || cur == Tiles.STONE || cur == Tiles.CLAY || cur == Tiles.MUD || cur == Tiles.EBONSTONE)
+                    boolean ok = ore ? (cur == Tiles.DIRT || cur == Tiles.STONE || cur == Tiles.CLAY || cur == Tiles.MUD
+                                    || cur == Tiles.EBONSTONE || cur == Tiles.SNOW || cur == Tiles.ICE)
                                      : (cur == Tiles.DIRT || cur == Tiles.STONE);
                     if (ok) world.setRaw(xx, yy, type);
                 }
@@ -587,17 +761,17 @@ final class WorldGen {
 
     private void ores() {
         // hellstone in the ash of the underworld
-        int hell = W / 8;
+        int hell = (int) (W / 8 * ore[HELLSTONE]);
         for (int i = 0; i < hell; i++) {
             int x = rnd.nextInt(W);
             int y = world.underworld + 2 + rnd.nextInt(Math.max(1, H - world.underworld - 4));
             runner(x, y, 1.6 + rnd.nextDouble(), 4 + rnd.nextInt(5), Tiles.HELLSTONE, Tiles.ASH);
         }
         double area = (double) W * (world.underworld);
-        oreVeins(Tiles.COPPER, (int) (area / 2200), 0.0, 0.85, 1.6);
-        oreVeins(Tiles.IRON, (int) (area / 2800), 0.26, 1.0, 1.6);
-        oreVeins(Tiles.SILVER, (int) (area / 3800), 0.36, 1.0, 1.5);
-        oreVeins(Tiles.GOLD, (int) (area / 5000), 0.46, 1.0, 1.5);
+        oreVeins(Tiles.COPPER, (int) (area / 2200 * ore[COPPER]), 0.0, 0.85, 1.6);
+        oreVeins(Tiles.IRON, (int) (area / 2800 * ore[IRON]), 0.26, 1.0, 1.6);
+        oreVeins(Tiles.SILVER, (int) (area / 3800 * ore[SILVER]), 0.36, 1.0, 1.5);
+        oreVeins(Tiles.GOLD, (int) (area / 5000 * ore[GOLD]), 0.46, 1.0, 1.5);
     }
 
     private void oreVeins(int type, int count, double minFrac, double maxFrac, double radius) {
@@ -636,12 +810,13 @@ final class WorldGen {
         int last = -100;
         for (int x = 8; x < W - 8; x++) {
             int top = world.surfaceAt(x);
-            if (top >= H || !Tiles.isGrass(world.tile(x, top))) continue;
+            if (top >= H || !Tiles.isTreeGround(world.tile(x, top))) continue;
             boolean jungle = world.tile(x, top) == Tiles.JUNGLE_GRASS;
             if (x - last < (jungle ? 3 : 6)) continue;
             double forest = noise3.fractal(x / 90.0 + 400, 2);
             double chance = forest > 0.0 ? 0.55 : forest > -0.2 ? 0.2 : 0.03;
             if (jungle) chance = 0.75;
+            if (world.tile(x, top) == Tiles.SNOW) chance = 0.45;
             if (Math.abs(x - W / 2) < 4) continue; // no tree on the spawn point
             if (rnd.nextDouble() > chance) continue;
             if (growTree(world, x, top, rnd)) last = x;
@@ -651,6 +826,7 @@ final class WorldGen {
     /** Grows a tree whose roots sit on top of tile (x, groundY); the kind depends on the grass. */
     static boolean growTree(World w, int x, int groundY, Random rnd) {
         int ground = w.tile(x, groundY);
+        if (ground == Tiles.SNOW) return growPine(w, x, groundY, rnd);
         if (!Tiles.isGrass(ground)) return false;
         int trunk = ground == Tiles.JUNGLE_GRASS ? Tiles.MAHOGANY_TRUNK : ground == Tiles.CORRUPT_GRASS ? Tiles.EBON_TRUNK : Tiles.TRUNK;
         int leaves = Tiles.leavesOf(trunk);
@@ -694,6 +870,36 @@ final class WorldGen {
                         && w.tile(x + side, y + 1) != leaves) {
                     w.set(x + side, y, leaves);
                 }
+            }
+        }
+        return true;
+    }
+
+    /** A boreal pine on snow: a bare trunk under a tiered cone of snowy needles. */
+    private static boolean growPine(World w, int x, int groundY, Random rnd) {
+        if (!Tiles.SOLID[w.tile(x - 1, groundY)] || !Tiles.SOLID[w.tile(x + 1, groundY)]) return false;
+        int trunkLen = 3 + rnd.nextInt(3), coneH = 6 + rnd.nextInt(5);
+        int coneBottom = groundY - trunkLen, coneTop = coneBottom - coneH;
+        int trunkTop = coneBottom - 2;
+        if (coneTop < 2) return false;
+        for (int y = coneTop - 1; y < groundY; y++)
+            for (int dx = -3; dx <= 3; dx++) {
+                int t = w.tile(x + dx, y);
+                if (Tiles.SOLID[t] || Tiles.isTrunk(t)) return false;
+                if (dx == 0 && !Tiles.PLACE_OVER[t] && t != Tiles.SAPLING) return false;
+            }
+        for (int dx = -5; dx <= 5; dx++)
+            for (int y = coneTop; y < groundY; y++)
+                if (dx != 0 && Tiles.isTrunk(w.tile(x + dx, y))) return false;
+        for (int y = trunkTop; y < groundY; y++) w.set(x, y, Tiles.BOREAL_TRUNK);
+        for (int y = coneTop; y <= coneBottom; y++) {
+            int t = y - coneTop;
+            int half = (int) Math.round(t * 0.45);
+            if (t > 2 && t % 3 == 0) half = Math.max(1, half - 1);
+            half = Math.min(3, half);
+            for (int dx = -half; dx <= half; dx++) {
+                int tt = w.tile(x + dx, y);
+                if (tt == Tiles.AIR || Tiles.PLACE_OVER[tt]) w.set(x + dx, y, Tiles.BOREAL_LEAVES);
             }
         }
         return true;

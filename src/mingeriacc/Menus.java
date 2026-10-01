@@ -6,21 +6,33 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Random;
 
-/** Title screen, world selection and creation, settings, help and the pause menu. */
+/**
+ * Title screen, character selection and creation, world selection and
+ * creation, settings, help and the pause menu.
+ */
 final class Menus {
     private final Main m;
     private Game titleGame;
     private double menuHour = 7.0, menuCam, titleCamY = Double.MAX_VALUE;
 
     private List<SaveIO.WorldInfo> worlds;
+    private List<Profile> characters;
     private int scroll;
     private SaveIO.WorldInfo confirmDelete;
-    private String worldError;
+    private Profile confirmDeleteChar;
+    private String worldError, charError;
 
     private final StringBuilder nameField = new StringBuilder();
     private final StringBuilder seedField = new StringBuilder();
     private int focus; // 0 = name, 1 = seed
     private int sizeChoice = 0;
+    private final double[] oreAmounts = {1, 1, 1, 1, 1, 1, 1};
+    private boolean oreOpen;
+
+    // character creation
+    private final StringBuilder charName = new StringBuilder();
+    private final Humanoid.Look newLook = new Humanoid.Look();
+    private final int[] lookChoice = new int[7];
 
     private WorldGen.Progress progress;
     private String genName;
@@ -30,6 +42,23 @@ final class Menus {
     private static final String[] NAMES = {"Mossy Hollow", "Stonebrook", "Pinewood", "Copper Peak", "Oakshore",
             "Quarry Vale", "Goldmere", "Sandridge", "Cliffhaven", "Frostmoor", "Thunderstone", "Sprucedale",
             "Molehill", "Resin Grove", "Bear Hollow", "Highfell"};
+    private static final String[] HERO_NAMES = {"Aino", "Bram", "Cora", "Dain", "Eira", "Finn", "Greta", "Halvar",
+            "Ilse", "Joni", "Kaisa", "Lumi", "Milo", "Nora", "Otso", "Pia", "Rune", "Saga", "Taavi", "Vilja"};
+
+    // appearance choices: hair style, hair, skin, eyes, shirt, pants, shoes
+    private static final String[] LOOK_NAMES = {"Hair", "Hair colour", "Skin", "Eyes", "Shirt", "Trousers", "Shoes"};
+    private static final int[] HAIR_STYLES = {Humanoid.HAIR_SHORT, Humanoid.HAIR_LONG, Humanoid.HAIR_SPIKY,
+            Humanoid.HAIR_BEARD, Humanoid.HAIR_NONE};
+    private static final String[] HAIR_STYLE_NAMES = {"Short", "Long", "Spiky", "Beard", "Bald"};
+    private static final int[][] LOOK_COLORS = {
+        null,
+        {Pal.HAIR, 0x2a1a10, 0xd8a040, 0xb04020, 0x8a8a90, 0xe8e8f0, 0x26262e, 0x5a7ad8, 0xd060a0, 0x4a9a3a},
+        {Pal.SKIN, 0xe0a070, 0xc08050, 0x8a5a3a, 0x5a3a28, 0xf8d0b0, 0x9ab870, 0xb0a0e0},
+        {0x2a4a8a, 0x3a8a4a, 0x6a4020, 0x5a5a6a, 0x8a2aa0, 0xa02020},
+        {Pal.SHIRT, 0xc83a3a, 0x3a9a4a, 0xe0c040, 0x8a4ac0, 0xe8e8e8, 0x3a3a44, 0xe07a2a, 0x2aa0a0},
+        {Pal.PANTS, 0x2a3a6a, 0x3a3a44, 0x7a7a62, 0x6a2a2a, 0x3a5a2a},
+        {Pal.SHOES, 0x5a3a20, 0x3a3a4a, 0x8a5a30, 0x6a2020},
+    };
 
     Menus(Main m) {
         this.m = m;
@@ -89,6 +118,8 @@ final class Menus {
     void render(Screen s, Input in) {
         switch (m.state) {
             case TITLE: title(s, in); break;
+            case CHARACTERS: characterList(s, in); break;
+            case NEW_CHARACTER: newCharacter(s, in); break;
             case WORLDS: worldList(s, in); break;
             case CREATE: create(s, in); break;
             case GENERATING: generating(s, in); break;
@@ -102,6 +133,7 @@ final class Menus {
         m.state = st;
         scroll = 0;
         confirmDelete = null;
+        confirmDeleteChar = null;
     }
 
     // ---- title screen ----------------------------------------------------------
@@ -182,6 +214,7 @@ final class Menus {
                             else c = Tiles.texel(Tiles.DIRT, 0, 0, 0, wx, wy);
                             if (gy >= 4 && (ore & 15) == 3) c = Tiles.tex[Tiles.GOLD][ore >> 4 & 3].p[(px % 8) + (py % 8) * 8];
                             if (gy >= 4 && (ore & 15) == 7) c = Tiles.tex[Tiles.COPPER][ore >> 4 & 3].p[(px % 8) + (py % 8) * 8];
+                            if (gy >= 4 && (ore & 15) == 11) c = Tiles.tex[Tiles.SAPPHIRE][ore >> 4 & 3].p[(px % 8) + (py % 8) * 8];
                             if (up && py < Math.max(2, n / 2)) c = py == 0 ? Pal.GRASS_HL : py == 1 ? Pal.GRASS_L : Pal.GRASS;
                             if ((lf && px == 0) || (dn && py == n - 1)) c = Pal.shade(c, 170);
                             else if ((rt && px == n - 1)) c = Pal.shade(c, 150);
@@ -205,8 +238,9 @@ final class Menus {
         int bw = 150, bh = 18, bx = (s.w - bw) / 2;
         int by = (int) (s.h * 0.44);
         if (Ui.button(s, in, "Play", bx, by, bw, bh)) {
-            worlds = SaveIO.listWorlds();
-            go(Main.State.WORLDS);
+            characters = SaveIO.listPlayers();
+            charError = null;
+            go(Main.State.CHARACTERS);
         }
         if (Ui.button(s, in, "Help", bx, by + 24, bw, bh)) {
             m.returnState = Main.State.TITLE;
@@ -224,6 +258,181 @@ final class Menus {
         s.textShadow("All graphics and sound made in code", 6, s.h - 11, Pal.UI_DIM);
     }
 
+    // ---- characters ------------------------------------------------------------
+
+    /** Draws a character standing, n times the normal size, with its feet at (cx, bottom). */
+    private static void figure(Screen s, Humanoid.Look look, int cx, int bottom, int n) {
+        if (n <= 1) {
+            Humanoid.drawBody(s, cx, bottom - Player.H, 1, look, 0, true, 0.3, 0xffffff, 0);
+            Humanoid.drawFrontArm(0.3, look);
+            return;
+        }
+        Screen tmp = new Screen(20, 32);
+        tmp.clear(0xff00ff);
+        Humanoid.drawBody(tmp, 10, 8, 1, look, 0, true, 0.3, 0xffffff, 0);
+        Humanoid.drawFrontArm(0.3, look);
+        int x0 = cx - 10 * n, y0 = bottom - 30 * n;
+        for (int y = 0; y < tmp.h; y++)
+            for (int x = 0; x < tmp.w; x++) {
+                int c = tmp.px[x + y * tmp.w] & 0xffffff;
+                if (c != 0xff00ff) s.fill(x0 + x * n, y0 + y * n, n, n, c);
+            }
+    }
+
+    private void characterList(Screen s, Input in) {
+        drawTitleBackground(s);
+        Ui.dim(s, 90);
+        int pw = Math.min(360, s.w - 20), ph = Math.min(270, s.h - 20);
+        int px = (s.w - pw) / 2, py = (s.h - ph) / 2;
+        s.panel(px, py, pw, ph);
+        s.textCenter("Select a Character", s.w / 2, py + 8, Pal.UI_SEL);
+        if (characters == null) characters = SaveIO.listPlayers();
+
+        int rowH = 28, listY = py + 24, visible = (ph - 24 - 46) / rowH;
+        if (confirmDeleteChar != null) {
+            s.textCenter("Delete the character " + confirmDeleteChar.name + "?", s.w / 2, py + ph / 2 - 30, Pal.UI_TEXT);
+            s.textCenter("Its inventory is lost. This cannot be undone.", s.w / 2, py + ph / 2 - 18, Pal.UI_BAD);
+            if (Ui.button(s, in, "Delete", s.w / 2 - 84, py + ph / 2, 80, 18)) {
+                if (!SaveIO.deletePlayer(confirmDeleteChar)) charError = "Deleting failed";
+                characters = SaveIO.listPlayers();
+                confirmDeleteChar = null;
+            }
+            if (Ui.button(s, in, "Cancel", s.w / 2 + 4, py + ph / 2, 80, 18) || in.pressed(KeyEvent.VK_ESCAPE)) {
+                confirmDeleteChar = null;
+            }
+            return;
+        }
+        if (characters.isEmpty()) {
+            s.textCenter("No characters yet.", s.w / 2, listY + 30, Pal.UI_DIM);
+            s.textCenter("Create your first one below!", s.w / 2, listY + 42, Pal.UI_DIM);
+        }
+        int maxScroll = Math.max(0, characters.size() - visible);
+        if (in.wheel != 0) scroll = Math.max(0, Math.min(maxScroll, scroll + in.wheel));
+        for (int i = 0; i < visible && i + scroll < characters.size(); i++) {
+            Profile p = characters.get(i + scroll);
+            int ry = listY + i * rowH;
+            int rw = pw - 16 - 24;
+            boolean hv = Ui.hover(in, px + 8, ry, rw, rowH - 3);
+            s.fillRound(px + 8, ry, rw, rowH - 3, hv ? Pal.UI_BG2 : Pal.BLACK, hv ? 230 : 120);
+            if (hv) s.rectRound(px + 8, ry, rw, rowH - 3, Pal.UI_SEL);
+            figure(s, p.look, px + 20, ry + rowH - 3, 1);
+            s.textShadow(p.name, px + 34, ry + 3, hv ? Pal.UI_SEL : Pal.UI_TEXT);
+            String info = "Life " + p.lifeMax + "   Mana " + p.manaMax + "   " + p.playTimeText();
+            s.text(info, px + 34, ry + 14, Pal.UI_DIM);
+            if (hv && in.clickL) {
+                in.consumeClicks();
+                m.audio.play(Audio.MENU, 0.45, 1.0);
+                m.profile = p;
+                worlds = SaveIO.listWorlds();
+                worldError = null;
+                go(Main.State.WORLDS);
+                return;
+            }
+            if (Ui.button(s, in, "X", px + pw - 30, ry, 20, rowH - 3)) confirmDeleteChar = p;
+        }
+        if (maxScroll > 0) {
+            s.textShadow((scroll + 1) + "-" + Math.min(characters.size(), scroll + visible) + " / " + characters.size(),
+                    px + pw - 60, py + 8, Pal.UI_DIM);
+        }
+        if (!SaveIO.migrated.isEmpty()) {
+            s.textCenter("Moved out of 0.3 worlds: " + String.join(", ", SaveIO.migrated), s.w / 2, py + ph - 40, Pal.UI_GOOD);
+        }
+        if (charError != null) s.textCenter(charError, s.w / 2, py + ph - 40, Pal.UI_BAD);
+        int bw = (pw - 24) / 2;
+        if (Ui.button(s, in, "New Character", px + 8, py + ph - 26, bw, 18)) {
+            charName.setLength(0);
+            charName.append(HERO_NAMES[new Random().nextInt(HERO_NAMES.length)]);
+            randomLook();
+            charError = null;
+            go(Main.State.NEW_CHARACTER);
+        }
+        if (Ui.button(s, in, "Back", px + 16 + bw, py + ph - 26, bw, 18) || in.pressed(KeyEvent.VK_ESCAPE)) {
+            charError = null;
+            SaveIO.migrated.clear();
+            go(Main.State.TITLE);
+        }
+    }
+
+    private void randomLook() {
+        Random r = new Random();
+        lookChoice[0] = r.nextInt(HAIR_STYLES.length - 1);
+        for (int k = 1; k < lookChoice.length; k++) lookChoice[k] = r.nextInt(Math.min(6, LOOK_COLORS[k].length));
+        applyLook();
+    }
+
+    private void applyLook() {
+        Humanoid.Look l = newLook;
+        l.hairStyle = HAIR_STYLES[lookChoice[0]];
+        l.hair = LOOK_COLORS[1][lookChoice[1]];
+        l.hairD = Pal.shade(l.hair, 170);
+        l.skin = LOOK_COLORS[2][lookChoice[2]];
+        l.skinD = Pal.shade(l.skin, 212);
+        l.eye = LOOK_COLORS[3][lookChoice[3]];
+        l.shirt = LOOK_COLORS[4][lookChoice[4]];
+        l.shirtD = Pal.shade(l.shirt, 185);
+        l.pants = LOOK_COLORS[5][lookChoice[5]];
+        l.pantsD = Pal.shade(l.pants, 180);
+        l.shoes = LOOK_COLORS[6][lookChoice[6]];
+    }
+
+    private void newCharacter(Screen s, Input in) {
+        drawTitleBackground(s);
+        Ui.dim(s, 90);
+        int pw = Math.min(330, s.w - 20), ph = Math.min(236, s.h - 16);
+        int px = (s.w - pw) / 2, py = (s.h - ph) / 2;
+        s.panel(px, py, pw, ph);
+        s.textCenter("New Character", s.w / 2, py + 8, Pal.UI_SEL);
+        int fx = px + 12, fw = pw - 24;
+        s.textShadow("Name", fx, py + 24, Pal.UI_TEXT);
+        Ui.textField(s, charName.toString(), fx, py + 34, fw, true, m.frameTicks);
+        boolean enter = Ui.edit(charName, in, 20, false);
+
+        // appearance on the left, a large preview on the right
+        int cw = 150, y = py + 58;
+        for (int k = 0; k < LOOK_NAMES.length; k++) {
+            s.textShadow(LOOK_NAMES[k], fx, y + 4, Pal.UI_DIM);
+            String label = k == 0 ? HAIR_STYLE_NAMES[lookChoice[0]] : "";
+            int count = k == 0 ? HAIR_STYLES.length : LOOK_COLORS[k].length;
+            int d = Ui.chooser(s, in, label, fx + 70, y, cw - 70 + 30);
+            if (k > 0) {
+                int c = LOOK_COLORS[k][lookChoice[k]];
+                int sx = fx + 70 + (cw - 70 + 30) / 2 - 8;
+                s.fillRound(sx, y + 2, 16, 10, c, 255);
+                s.rectRound(sx, y + 2, 16, 10, Pal.UI_EDGE);
+            }
+            if (d != 0) {
+                lookChoice[k] = Math.floorMod(lookChoice[k] + d, count);
+                applyLook();
+            }
+            y += 18;
+        }
+        int bx = fx + cw + 40, bw2 = px + pw - 12 - bx;
+        s.fillRound(bx, py + 58, bw2, 124, Pal.BLACK, 120);
+        figure(s, newLook, bx + bw2 / 2, py + 58 + 116, 3);
+
+        int bw = (fw - 16) / 3;
+        int by = py + ph - 26;
+        if (Ui.button(s, in, "Random", fx, by, bw, 18)) randomLook();
+        boolean ok = charName.toString().trim().length() > 0;
+        if (Ui.button(s, in, "Create", fx + bw + 8, by, bw, 18, ok) || (enter && ok)) {
+            try {
+                Profile p = SaveIO.createPlayer(charName.toString().trim(), newLook);
+                characters = SaveIO.listPlayers();
+                m.profile = p;
+                worlds = SaveIO.listWorlds();
+                worldError = null;
+                go(Main.State.WORLDS);
+            } catch (IOException e) {
+                charError = "Creating the character failed: " + e.getMessage();
+                go(Main.State.CHARACTERS);
+            }
+            return;
+        }
+        if (Ui.button(s, in, "Back", fx + 2 * (bw + 8), by, bw, 18) || in.pressed(KeyEvent.VK_ESCAPE)) {
+            go(Main.State.CHARACTERS);
+        }
+    }
+
     // ---- worlds -----------------------------------------------------------------
 
     private void worldList(Screen s, Input in) {
@@ -233,6 +442,7 @@ final class Menus {
         int px = (s.w - pw) / 2, py = (s.h - ph) / 2;
         s.panel(px, py, pw, ph);
         s.textCenter("Select a World", s.w / 2, py + 8, Pal.UI_SEL);
+        if (m.profile != null) s.textShadow(m.profile.name, px + 10, py + 8, Pal.UI_DIM);
 
         int rowH = 22, listY = py + 24, visible = (ph - 24 - 34) / rowH;
         if (worlds == null) worlds = SaveIO.listWorlds();
@@ -284,12 +494,14 @@ final class Menus {
             nameField.append(NAMES[new Random().nextInt(NAMES.length)]);
             seedField.setLength(0);
             focus = 0;
+            oreOpen = false;
             worldError = null;
             go(Main.State.CREATE);
         }
         if (Ui.button(s, in, "Back", px + 16 + bw, py + ph - 26, bw, 18) || in.pressed(KeyEvent.VK_ESCAPE)) {
             worldError = null;
-            go(Main.State.TITLE);
+            characters = SaveIO.listPlayers();
+            go(Main.State.CHARACTERS);
         }
     }
 
@@ -298,6 +510,7 @@ final class Menus {
             Game g = SaveIO.load(wi.file, m.audio);
             g.viewW = m.screen.w;
             g.viewH = m.screen.h;
+            SaveIO.loadPlayer(m.profile, g);
             g.snapCamera();
             g.message("Welcome back to " + g.world.name + "!", Pal.UI_SEL);
             m.startGame(g, wi.file);
@@ -311,9 +524,24 @@ final class Menus {
 
     // ---- new world --------------------------------------------------------------
 
+    private static String amountText(double v) {
+        if (v <= 0) return "None";
+        String t = String.format(java.util.Locale.ROOT, "%.2f", v).replaceAll("0+$", "");
+        return (t.endsWith(".") ? t.substring(0, t.length() - 1) : t) + "x";
+    }
+
+    private boolean oresNormal() {
+        for (double v : oreAmounts) if (v != 1) return false;
+        return true;
+    }
+
     private void create(Screen s, Input in) {
         drawTitleBackground(s);
         Ui.dim(s, 90);
+        if (oreOpen) {
+            ores(s, in);
+            return;
+        }
         int pw = Math.min(320, s.w - 20), ph = 200;
         int px = (s.w - pw) / 2, py = (s.h - ph) / 2;
         s.panel(px, py, pw, ph);
@@ -337,6 +565,8 @@ final class Menus {
         Ui.textField(s, seedField.toString(), fx, py + 118, fw, focus == 1, m.frameTicks);
         if (in.clickL && Ui.hover(in, fx, py + 118, fw, 16)) focus = 1;
 
+        if (Ui.button(s, in, "Ores and gems: " + (oresNormal() ? "normal" : "custom"), fx, py + 142, fw, 18)) oreOpen = true;
+
         if (in.pressed(KeyEvent.VK_TAB)) focus = 1 - focus;
         boolean enter = focus == 0 ? Ui.edit(nameField, in, 20, false) : Ui.edit(seedField, in, 18, true);
 
@@ -346,6 +576,28 @@ final class Menus {
         if (Ui.button(s, in, "Back", fx + bw2 + 8, py + ph - 28, bw2, 18) || in.pressed(KeyEvent.VK_ESCAPE)) {
             go(Main.State.WORLDS);
         }
+    }
+
+    /** Sliders for how much of each ore (and gems) the new world gets. */
+    private void ores(Screen s, Input in) {
+        int rows = WorldGen.ORE_NAMES.length;
+        int pw = Math.min(300, s.w - 20), ph = 44 + rows * 18 + 30;
+        int px = (s.w - pw) / 2, py = (s.h - ph) / 2;
+        s.panel(px, py, pw, ph);
+        s.textCenter("Ores and Gems", s.w / 2, py + 8, Pal.UI_SEL);
+        s.textCenter("How much of each the world gets", s.w / 2, py + 20, Pal.UI_DIM);
+        int y = py + 38;
+        for (int k = 0; k < rows; k++) {
+            s.textShadow(WorldGen.ORE_NAMES[k], px + 14, y, Pal.UI_TEXT);
+            oreAmounts[k] = Ui.slider(s, in, px + 90, y, pw - 160, oreAmounts[k], 0, 3, 0.25);
+            String v = amountText(oreAmounts[k]);
+            s.textShadow(v, px + pw - 14 - Font.width(v), y, oreAmounts[k] == 1 ? Pal.UI_DIM : Pal.UI_SEL);
+            y += 18;
+        }
+        int bw = (pw - 32) / 2;
+        if (Ui.button(s, in, "Reset", px + 12, py + ph - 26, bw, 18)) java.util.Arrays.fill(oreAmounts, 1);
+        if (Ui.button(s, in, "Done", px + 20 + bw, py + ph - 26, bw, 18) || in.pressed(KeyEvent.VK_ESCAPE)
+                || in.pressed(KeyEvent.VK_ENTER)) oreOpen = false;
     }
 
     private void startGeneration() {
@@ -368,9 +620,10 @@ final class Menus {
         final String name = genName;
         final int size = genSize;
         final long sd = seed;
+        final double[] amounts = oreAmounts.clone();
         Thread t = new Thread(() -> {
             try {
-                p.result = WorldGen.generate(name, size, sd, p);
+                p.result = WorldGen.generate(name, size, sd, p, amounts);
             } catch (Throwable e) {
                 p.error = e;
             }
@@ -404,6 +657,13 @@ final class Menus {
             Game g = new Game(w, m.audio);
             g.viewW = m.screen.w;
             g.viewH = m.screen.h;
+            try {
+                SaveIO.loadPlayer(m.profile, g);
+            } catch (IOException e) {
+                worldError = "Loading the character failed: " + e.getMessage();
+                go(Main.State.WORLDS);
+                return;
+            }
             g.startNew();
             File f = SaveIO.newWorldFile(w.name);
             m.startGame(g, f);
@@ -419,7 +679,7 @@ final class Menus {
     private void settings(Screen s, Input in) {
         background(s);
         Ui.dim(s, 120);
-        int pw = Math.min(300, s.w - 20), ph = 218;
+        int pw = Math.min(300, s.w - 20), ph = 242;
         int px = (s.w - pw) / 2, py = (s.h - ph) / 2;
         s.panel(px, py, pw, ph);
         s.textCenter("Settings", s.w / 2, py + 8, Pal.UI_SEL);
@@ -449,6 +709,10 @@ final class Menus {
         if (Ui.button(s, in, "FPS counter: " + (m.showFps ? "Yes" : "No") + "  (F3)", px + 12, y, pw - 24, 18)) {
             m.showFps = !m.showFps;
         }
+        y += 24;
+        if (Ui.button(s, in, "Cheat menu (for testing): " + (m.cheats ? "On" : "Off"), px + 12, y, pw - 24, 18)) {
+            m.cheats = !m.cheats;
+        }
         if (Ui.button(s, in, "Back", px + 12, py + ph - 28, pw - 24, 18) || in.pressed(KeyEvent.VK_ESCAPE)) {
             m.saveSettings();
             go(m.returnState);
@@ -466,10 +730,10 @@ final class Menus {
     // ---- help ----------------------------------------------------------------------
 
     private static final String[][] CONTROLS = {
-        {"A / D or arrows", "Move"},
+        {"A / D or arrows", "Move (double tap: dash with the Shield of the Eye)"},
         {"Space / W", "Jump (hold for a higher jump)"},
         {"S", "Drop through a wood platform"},
-        {"Left mouse", "Use: mine, chop, build, attack"},
+        {"Left mouse", "Use: mine, chop, build, attack, cast"},
         {"Right mouse", "Doors, chests, beds, talk; equip gear"},
         {"Wheel / 1-0", "Select a hotbar slot"},
         {"E or I", "Inventory and crafting"},
@@ -483,17 +747,17 @@ final class Menus {
 
     private static final String[] TIPS = {
         "Craft a work bench from wood, then a furnace to smelt ore into bars.",
-        "An anvil (5 iron bars) makes better tools, swords and bows from bars.",
-        "Slimes drop gel for torches. Zombies and demon eyes come out at night.",
+        "An anvil (5 iron bars) makes better tools, weapons, and staffs from gems.",
+        "Slimes drop gel for torches. Five fallen stars make a mana crystal.",
         "Life crystals deep underground raise your maximum life.",
         "Build a house (walls, door, light, table, chair) and town folk move in.",
-        "The world saves itself every 5 minutes and when you quit.",
+        "The world and your character save every 5 minutes and when you quit.",
     };
 
     private void help(Screen s, Input in) {
         background(s);
         Ui.dim(s, 130);
-        int pw = Math.min(470, s.w - 16), ph = Math.min(s.h - 16, 272);
+        int pw = Math.min(480, s.w - 16), ph = Math.min(s.h - 16, 272);
         int px = (s.w - pw) / 2, py = (s.h - ph) / 2;
         s.panel(px, py, pw, ph);
         s.textCenter("Help", s.w / 2, py + 8, Pal.UI_SEL);

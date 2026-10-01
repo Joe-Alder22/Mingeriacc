@@ -54,7 +54,7 @@ final class Recipes {
         }
     }
 
-    private static final int[] WOODS = {Items.WOOD, Items.MAHOGANY, Items.EBONWOOD};
+    private static final int[] WOODS = {Items.WOOD, Items.MAHOGANY, Items.EBONWOOD, Items.BOREAL_WOOD};
 
     /** How many of an ingredient the player has ("Wood" means any kind of wood). */
     static int have(Inventory inv, int item) {
@@ -71,6 +71,7 @@ final class Recipes {
         new Recipe(Items.WORKBENCH, 1, HAND, Items.WOOD, 10),
         new Recipe(Items.TORCH, 3, HAND, Items.WOOD, 1, Items.GEL, 1),
         new Recipe(Items.PLATFORM, 2, HAND, Items.WOOD, 1),
+        new Recipe(Items.MANA_CRYSTAL, 1, HAND, Items.FALLEN_STAR, 5),
         // work bench
         new Recipe(Items.WOOD_SWORD, 1, WB, Items.WOOD, 7),
         new Recipe(Items.WOOD_BOW, 1, WB, Items.WOOD, 10),
@@ -95,6 +96,10 @@ final class Recipes {
         new Recipe(Items.MAHOGANY_WALL, 4, WB, Items.MAHOGANY, 1),
         new Recipe(Items.OBSIDIAN_BRICK_WALL, 4, WB, Items.OBSIDIAN_BRICK, 1),
         new Recipe(Items.HELLSTONE_BRICK_WALL, 4, WB, Items.HELLSTONE_BRICK, 1),
+        new Recipe(Items.BOREAL_WALL, 4, WB, Items.BOREAL_WOOD, 1),
+        new Recipe(Items.MANA_POTION, 2, WB, Items.BOTTLE, 2, Items.GEL, 2, Items.FALLEN_STAR, 1),
+        new Recipe(Items.SUSPICIOUS_EYE, 1, WB, Items.LENS, 6),
+        new Recipe(Items.ICE_CHEST, 1, WB, Items.BOREAL_WOOD, 8, Items.ICE_BLOCK, 4, Items.IRON_BAR, 2),
         // furnace
         new Recipe(Items.COPPER_BAR, 1, FN, Items.COPPER_ORE, 3),
         new Recipe(Items.IRON_BAR, 1, FN, Items.IRON_ORE, 3),
@@ -158,6 +163,11 @@ final class Recipes {
         new Recipe(Items.MOLTEN_HELMET, 1, AN, Items.HELLSTONE_BAR, 20),
         new Recipe(Items.MOLTEN_MAIL, 1, AN, Items.HELLSTONE_BAR, 30),
         new Recipe(Items.MOLTEN_GREAVES, 1, AN, Items.HELLSTONE_BAR, 25),
+        new Recipe(Items.FLAME_STAFF, 1, AN, Items.COPPER_BAR, 10, Items.RUBY, 8),
+        new Recipe(Items.TIDE_STAFF, 1, AN, Items.IRON_BAR, 10, Items.SAPPHIRE, 8),
+        new Recipe(Items.QUAKE_STAFF, 1, AN, Items.SILVER_BAR, 10, Items.EMERALD, 8),
+        new Recipe(Items.STORM_STAFF, 1, AN, Items.GOLD_BAR, 10, Items.TOPAZ, 8),
+        new Recipe(Items.UNHOLY_ARROW, 15, AN, Items.WOOD_ARROW, 15, Items.DEMONITE_BAR, 1),
     };
 
     static String stationName(int station) {

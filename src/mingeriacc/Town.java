@@ -14,10 +14,26 @@ final class Town {
     private static final String[] GUIDE_NAMES = {"Andrew", "Asher", "Brandon", "Cole", "Dylan", "Garrett", "Jake", "Levi"};
     private static final String[] MERCHANT_NAMES = {"Alfred", "Barney", "Gilbert", "Harold", "Milton", "Walter"};
     private static final String[] NURSE_NAMES = {"Abigail", "Allison", "Amy", "Kelsey", "Molly", "Nora"};
+    private static final String[] ARCANIST_NAMES = {"Alaric", "Merlo", "Ozwin", "Thessaly", "Vesper", "Isolde"};
+    private static final String[] DRYAD_NAMES = {"Celestine", "Elora", "Fern", "Ivy", "Lyra", "Willow"};
 
     static final int[] MERCHANT_SHOP = {Items.TORCH, Items.WOOD_ARROW, Items.HEALING_POTION, Items.BOTTLE,
             Items.MINING_HELMET, Items.EMPTY_BUCKET, Items.COPPER_PICK, Items.COPPER_AXE, Items.ACORN, Items.CHAIR,
             Items.FLAMING_ARROW};
+    static final int[] ARCANIST_SHOP = {Items.MANA_POTION, Items.FLAME_STAFF, Items.BAND_STARPOWER, Items.ARCANE_HAT,
+            Items.MAGIC_MIRROR};
+    static final int[] DRYAD_SHOP = {Items.ACORN, Items.GRASS_SEEDS, Items.JUNGLE_SEEDS, Items.PURIFICATION_POWDER,
+            Items.MUSHROOM};
+
+    /** What a town dweller sells, or null. */
+    static int[] shop(int type) {
+        switch (type) {
+            case Mobs.MERCHANT: return MERCHANT_SHOP;
+            case Mobs.ARCANIST: return ARCANIST_SHOP;
+            case Mobs.DRYAD: return DRYAD_SHOP;
+            default: return null;
+        }
+    }
 
     private static final String[] GUIDE_TIPS = {
         "Chop trees with your axe, then make a work bench from ten wood.",
@@ -32,6 +48,24 @@ final class Town {
         "Where water meets lava, obsidian forms. You need it for hellstone bars.",
         "Chests in caves often hold boots, balloons and other useful gear. Wear them from your inventory.",
         "If you carry fifty silver coins, a merchant might move into a free house.",
+        "Stars fall on clear nights. Five fallen stars make a mana crystal, and more mana means more magic.",
+        "Gems glitter deep in the caverns. With metal bars they become staffs of fire, water, earth and lightning.",
+        "Demon eyes drop lenses. Six of them make an eye that something big will come looking for at night.",
+        "Snow and ice lie on one side of the world. Ice is slippery, unless you wear skates.",
+        "When the moon turns red, stay inside. The dead get bold enough to push doors open.",
+        "Hearts and stars dropped by enemies heal you and restore your mana.",
+    };
+
+    private static final String[] ARCANIST_LINES = {
+        "Fire, water, earth and lightning. Every gem holds one of them.",
+        "Stars fall on clear nights. Gather five, and their power becomes yours.",
+        "Magic needs mana, and mana needs patience. Or potions.",
+    };
+
+    private static final String[] DRYAD_LINES = {
+        "The forest is glad the Eye is gone. So am I.",
+        "Plant seeds, grow trees, and the land will thank you.",
+        "Purification powder pushes the corruption back, a little at a time.",
     };
 
     private static final String[] MERCHANT_LINES = {
@@ -134,7 +168,8 @@ final class Town {
     static Mob create(Game g, int type, double cx, double bottom) {
         Mob m = new Mob(type, cx, bottom);
         m.passDoors = true;
-        String[] names = type == Mobs.GUIDE ? GUIDE_NAMES : type == Mobs.MERCHANT ? MERCHANT_NAMES : NURSE_NAMES;
+        String[] names = type == Mobs.GUIDE ? GUIDE_NAMES : type == Mobs.MERCHANT ? MERCHANT_NAMES
+                : type == Mobs.ARCANIST ? ARCANIST_NAMES : type == Mobs.DRYAD ? DRYAD_NAMES : NURSE_NAMES;
         m.name = names[g.rnd.nextInt(names.length)];
         m.ai[3] = cx;
         return m;
@@ -163,6 +198,8 @@ final class Town {
         if (!present(g, Mobs.GUIDE)) want = Mobs.GUIDE;
         else if (!present(g, Mobs.MERCHANT) && g.inv.money() >= 5000) want = Mobs.MERCHANT;
         else if (!present(g, Mobs.NURSE) && present(g, Mobs.MERCHANT) && g.player.lifeMax > 100) want = Mobs.NURSE;
+        else if (!present(g, Mobs.ARCANIST) && g.player.manaMax > Player.BASE_MANA) want = Mobs.ARCANIST;
+        else if (!present(g, Mobs.DRYAD) && g.world.downedEye) want = Mobs.DRYAD;
         if (want < 0) return;
         int[] h = findHome(g);
         if (h == null) return;
@@ -244,8 +281,30 @@ final class Town {
         switch (m.type) {
             case Mobs.GUIDE: return "Hello! Ask me for help if you're stuck.";
             case Mobs.MERCHANT: return MERCHANT_LINES[g.rnd.nextInt(MERCHANT_LINES.length)];
+            case Mobs.ARCANIST: return ARCANIST_LINES[g.rnd.nextInt(ARCANIST_LINES.length)];
+            case Mobs.DRYAD: {
+                String line = DRYAD_LINES[g.rnd.nextInt(DRYAD_LINES.length)];
+                double c = corruption(g.world);
+                return line + " " + (c < 0.05 ? "The world is free of corruption!"
+                        : String.format(java.util.Locale.ROOT, "The world is %.1f%% corrupt.", c));
+            }
             default: return NURSE_LINES[g.rnd.nextInt(NURSE_LINES.length)];
         }
+    }
+
+    /** How much of the world is corrupt, in percent of its ground. */
+    static double corruption(World w) {
+        long bad = 0, all = 0;
+        for (int i = 0; i < w.tiles.length; i++) {
+            int t = w.tiles[i] & 0xff;
+            if (t == Tiles.EBONSTONE || t == Tiles.CORRUPT_GRASS || t == Tiles.EBONSAND || t == Tiles.DEMONITE) {
+                bad++;
+                all++;
+            } else if (Tiles.SOLID[t]) {
+                all++;
+            }
+        }
+        return all == 0 ? 0 : bad * 100.0 / all;
     }
 
     static String guideTip(Game g) {

@@ -9,6 +9,8 @@ final class Player extends Body {
     static final double JUMP_SPEED = 2.55;
     static final int JUMP_HOLD = 13;
     static final int MAX_LIFE_CAP = 400;
+    static final int BASE_MANA = 20, MAX_MANA_CAP = 200;
+    static final int DASH_TIME = 20;
 
     final Humanoid.Look look = new Humanoid.Look();
     int dir = 1;
@@ -29,12 +31,24 @@ final class Player extends Body {
     double fallStartY;
     int fallDamage;      // set when landing after a long fall
 
+    // mana (manaMax grows with mana crystals; manaBonus comes from equipment)
+    int mana = BASE_MANA, manaMax = BASE_MANA;
+    int manaDelay;       // frames until mana starts to regenerate
+    private double manaAcc, manaRamp;
+
     // stats from equipment (set every frame by Game.applyEquipment)
     int defense;
     double moveSpeed = 1, jumpBoost = 0;
-    double regenBonus, damageBonus;
-    boolean sprint, doubleJump, noFall, fireImmune, swim, headLight;
+    double regenBonus, damageBonus, magicBonus;
+    int manaBonus;
+    boolean sprint, doubleJump, noFall, fireImmune, swim, headLight, canDash, iceSkates;
+    double doubleJumpPower = 1;
     String setBonus = "";
+
+    // dash (Shield of the Eye): requested by a double tap, hits enemies while dashTimer > 0
+    int dashRequest, dashTimer, dashCooldown;
+    boolean onIce;
+    int chilled;         // frost slows the player down
 
     // liquids and debuffs
     static final int BREATH_MAX = 200;
@@ -63,8 +77,52 @@ final class Player extends Body {
         y = sy * T - H;
         vx = vy = 0;
         fallStartY = y;
-        onFire = poisoned = 0;
+        onFire = poisoned = chilled = 0;
         breath = BREATH_MAX;
+    }
+
+    int manaCap() {
+        return manaMax + manaBonus;
+    }
+
+    /** Spends mana; returns false if there is not enough. */
+    boolean useMana(int n) {
+        if (mana < n) return false;
+        mana -= n;
+        manaDelay = 45;
+        manaRamp = 0;
+        return true;
+    }
+
+    /** Mana regenerates after a short pause, faster when standing still. */
+    void regenerateMana() {
+        int cap = manaCap();
+        if (mana >= cap) {
+            mana = Math.min(mana, cap);
+            manaAcc = 0;
+            return;
+        }
+        if (manaDelay > 0) {
+            manaDelay--;
+            return;
+        }
+        manaRamp = Math.min(1, manaRamp + 1 / 90.0);
+        double perSec = (cap / 6.0 + 1.5) * (0.3 + 0.7 * manaRamp);
+        if (Math.abs(vx) < 0.05 && onGround) perSec *= 1.5;
+        manaAcc += perSec / 60.0;
+        while (manaAcc >= 1 && mana < cap) {
+            manaAcc -= 1;
+            mana++;
+        }
+    }
+
+    /** Whether the body stands on a tile of the given type. */
+    boolean standingOn(World wd, int tile) {
+        if (!onGround) return false;
+        int row = (int) Math.floor((y + h + 0.5) / T);
+        int tx0 = (int) Math.floor(x / T), tx1 = (int) Math.floor((x + w - 0.001) / T);
+        for (int tx = tx0; tx <= tx1; tx++) if (wd.tile(tx, row) == tile) return true;
+        return false;
     }
 
     /** Whether any tile the body covers holds enough liquid of the type. */
@@ -88,13 +146,16 @@ final class Player extends Body {
         wet = inLiquid(wd, Liquids.WATER, y + 6, y + H);
         lavaWet = inLiquid(wd, Liquids.LAVA, y + 4, y + H);
         headWet = inLiquid(wd, Liquids.WATER, y + 2, y + 5);
+        onIce = standingOn(wd, Tiles.ICE);
+        boolean slippery = onIce && !iceSkates;
         boolean sprinting = sprint && runTimer > 50 && onGround;
-        double maxSpeed = MAX_SPEED * moveSpeed * (sprinting ? 1.55 : 1) * (wet && !swim ? 0.55 : lavaWet ? 0.5 : 1);
+        double maxSpeed = MAX_SPEED * moveSpeed * (sprinting ? 1.55 : 1) * (wet && !swim ? 0.55 : lavaWet ? 0.5 : 1)
+                * (chilled > 0 ? 0.7 : 1) * (onIce && iceSkates ? 1.25 : 1);
         if (onGround && Math.abs(vx) > MAX_SPEED * 0.9 && (left || right)) runTimer++;
         else if (!left && !right || Math.abs(vx) < 0.5) runTimer = 0;
 
-        // horizontal movement
-        double accel = onGround ? 0.11 : 0.08;
+        // horizontal movement (ice is slippery without skates)
+        double accel = onGround ? (slippery ? 0.035 : 0.11) : 0.08;
         if (left && !right) {
             if (vx > -maxSpeed) vx = Math.max(-maxSpeed, vx - accel * (vx > 0 ? 2 : 1));
             if (!using()) dir = -1;
@@ -102,10 +163,20 @@ final class Player extends Body {
             if (vx < maxSpeed) vx = Math.min(maxSpeed, vx + accel * (vx < 0 ? 2 : 1));
             if (!using()) dir = 1;
         } else {
-            vx *= onGround ? 0.78 : 0.96;
+            vx *= onGround ? (slippery ? 0.985 : 0.78) : 0.96;
             if (Math.abs(vx) < 0.03) vx = 0;
         }
-        if (Math.abs(vx) > maxSpeed * 1.5) vx *= 0.92; // knockback fades
+        // dash: a burst of speed that fades like knockback
+        if (dashRequest != 0 && canDash && dashCooldown == 0 && controlsEnabled) {
+            vx = dashRequest * 4.4;
+            dashTimer = DASH_TIME;
+            dashCooldown = 50;
+            dir = dashRequest;
+        }
+        dashRequest = 0;
+        if (dashTimer > 0) dashTimer--;
+        if (dashCooldown > 0) dashCooldown--;
+        if (Math.abs(vx) > maxSpeed * 1.5) vx *= dashTimer > 0 ? 0.96 : 0.92; // knockback fades
 
         // jump: input buffer + "coyote time" + higher jump while held
         if (controlsEnabled && in.jumpPressed()) jumpBuffer = 7;
@@ -122,7 +193,7 @@ final class Player extends Body {
             jumpBuffer = 0;
         } else if (jumpBuffer > 0 && coyote == 0 && !onGround && doubleJump && !usedDouble && in.jumpPressed()) {
             vy = -JUMP_SPEED;
-            jumpTimer = JUMP_HOLD * 3 / 4;
+            jumpTimer = (int) Math.round(JUMP_HOLD * 0.75 * doubleJumpPower);
             jumpBuffer = 0;
             usedDouble = true;
             didDoubleJump = true;
@@ -183,6 +254,7 @@ final class Player extends Body {
         if (potionSickness > 0) potionSickness--;
         if (onFire > 0) onFire--;
         if (poisoned > 0) poisoned--;
+        if (chilled > 0) chilled--;
         sinceHurt++;
         ticks++;
     }
@@ -263,9 +335,9 @@ final class Player extends Body {
                 }
                 s.drawRotated(icon, pivX, pivY, hx, hy, rot, dir < 0, light);
                 Humanoid.drawItemArm(A, look);
-            } else if (style == Items.S_STAB) {
+            } else if (style == Items.S_STAB || style == Items.S_CAST) {
                 double A = armAngleFor(aimAngle);
-                double reach = 2 + stabReach() * 5;
+                double reach = style == Items.S_CAST ? 4 - stabReach() * 1.5 : 2 + stabReach() * 5;
                 double hx = sx + Math.cos(aimAngle) * reach, hy = sy + Math.sin(aimAngle) * reach;
                 s.drawRotated(icon, 1.5, icon.h - 1.5, hx, hy, aimAngle + Math.PI / 4, false, light);
                 Humanoid.drawItemArm(A, look);

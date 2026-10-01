@@ -93,6 +93,109 @@ final class TileArt {
         cracks();
         caves(r);
         buildV3(r);
+        buildV4(r);
+    }
+
+    // ---- version 0.4: gems, moss, snow and ice ---------------------------------
+
+    private static Sprite[] gemTex(Random r, int c) {
+        int[] g = {Pal.shade(c, 120), c, Pal.lerp(c, 0xffffff, 0.4), Pal.lerp(c, 0xffffff, 0.8)};
+        Sprite[] out = new Sprite[4];
+        for (int i = 0; i < 4; i++) {
+            Sprite s = stoneTex(r, Pal.STONE, Pal.STONE_D, Pal.STONE_L);
+            int n = 1 + r.nextInt(2);
+            for (int k = 0; k < n; k++) {
+                int cx = 2 + r.nextInt(4), cy = 2 + r.nextInt(4);
+                int rad = k == 0 ? 2 : 1;
+                for (int dy = -rad; dy <= rad; dy++)
+                    for (int dx = -rad; dx <= rad; dx++) {
+                        if (Math.abs(dx) + Math.abs(dy) > rad) continue;
+                        int col = dx + dy < 0 ? g[2] : dx + dy > 0 ? g[0] : g[1];
+                        s.set(cx + dx, cy + dy, col);
+                    }
+                s.set(cx - 1 + (rad == 1 ? 1 : 0), cy - 1 + (rad == 1 ? 1 : 0), g[3]);
+                s.set(cx + rad, cy + rad, Pal.STONE_D);
+            }
+            out[i] = s;
+        }
+        return out;
+    }
+
+    private static void buildV4(Random r) {
+        Tiles.tex[Tiles.RUBY] = gemTex(r, Pal.RUBY);
+        Tiles.tex[Tiles.SAPPHIRE] = gemTex(r, Pal.SAPPHIRE);
+        Tiles.tex[Tiles.EMERALD] = gemTex(r, Pal.EMERALD);
+        Tiles.tex[Tiles.TOPAZ] = gemTex(r, Pal.TOPAZ);
+        for (int k = 0; k < 5; k++) {
+            int[] m = Tiles.MOSS[Tiles.GREEN_MOSS + k];
+            Tiles.tex[Tiles.GREEN_MOSS + k] = Tiles.tex[Tiles.STONE];
+            Tiles.mossPlant[k] = tufts(m[1], m[2], m[3]);
+        }
+        Tiles.tex[Tiles.MOSS_PLANT] = Tiles.mossPlant[0];
+
+        // snow: soft drifts with glittering specks
+        Sprite snow = noiseMacro(r, 0xa8b8d4, Pal.SNOW_D, Pal.SNOW, Pal.SNOW_L);
+        for (int k = 0; k < 40; k++) snow.set(r.nextInt(64), r.nextInt(64), 0xffffff);
+        Tiles.macro[Tiles.SNOW] = snow;
+        // ice: clear blue with diagonal streaks of light and a few dark cracks
+        int n = 32;
+        double[] a = tnoise(r, n, 4, 2);
+        Sprite ice = new Sprite(n, n);
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++) {
+                double v = Math.sin((x + y + a[x + y * n] * 6) * Math.PI * 2 / 16.0);
+                int c = v > 0.8 ? Pal.ICE_L : v < -0.75 ? Pal.ICE_D : Pal.lerp(Pal.ICE, Pal.ICE_L, a[x + y * n] * 0.4);
+                ice.set(x, y, c);
+            }
+        for (int k = 0; k < 4; k++) {
+            int x = r.nextInt(n), y = r.nextInt(n);
+            for (int s = 0; s < 5; s++) ice.set((x + s) % n, (y + (s + 1) / 2) % n, 0x4a7aa8);
+        }
+        for (int k = 0; k < 14; k++) ice.set(r.nextInt(n), r.nextInt(n), 0xf4fcff);
+        Tiles.macro[Tiles.ICE] = ice;
+
+        int[] borealPairs = {Pal.BARK_D, 0x3a3026, Pal.BARK, 0x5a4c3c, Pal.BARK_L, 0x7a6a56,
+                Pal.lerp(Pal.BARK, Pal.BARK_D, 0.5), 0x4a3e32};
+        Tiles.tex[Tiles.BOREAL_TRUNK] = recolorAll(Tiles.tex[Tiles.TRUNK], borealPairs);
+        Tiles.trunkBaseBoreal = recolorAll(Tiles.trunkBase, borealPairs);
+        Sprite[] boreal = leaves(r, 0x163028, 0x224a3c, 0x346a52, 0x4e8a6a);
+        for (Sprite s : boreal)
+            for (int k = 0; k < 5; k++) s.set(r.nextInt(8), r.nextInt(8), r.nextBoolean() ? 0xf0f6ff : 0xc8d8ec);
+        Tiles.tex[Tiles.BOREAL_LEAVES] = boreal;
+        Tiles.macro[Tiles.BOREAL_PLANKS] = planksMacro(r, Pal.BOREAL_D, Pal.BOREAL, Pal.BOREAL_L, 0x3a2e22);
+
+        Map2 frozen = new Map2('k', 0x1e3a5a, 'd', Pal.ICE_D, 'w', Pal.ICE, 'l', Pal.ICE_L, 'i', 0x4a6a8a,
+                'I', 0xe8f8ff, 'y', 0x6ab0e8);
+        String[] chest = {
+            "................",
+            "..kkkkkkkkkkkk..",
+            ".klllllllllllldk",
+            ".kIwwwwwwwwwwIdk",
+            ".kIwwlwwwwwwwIdk",
+            ".kIddddddddddIdk",
+            ".kkkkkkyykkkkkkk",
+            ".kIlllkIIklllIdk",
+            ".kIwwwkyykwwwIdk",
+            ".kIwwwwwwwwlwIdk",
+            ".kIwlwwwwwwwwIdk",
+            ".kIwwwwwwwwwwIdk",
+            ".kIddddddddddIdk",
+            ".kiiiiiiiiiiiiik",
+            ".kkkkkkkkkkkkkkk",
+            "................",
+        };
+        Tiles.furn[Tiles.ICE_CHEST] = new Sprite[]{frozen.ascii(chest)};
+
+        Tiles.wallTex[Tiles.W_SNOW_N] = new Sprite[]{roughWall(r, 0x46506a, 0x68748e, 0x343c52)};
+        Tiles.wallTex[Tiles.W_ICE_N] = new Sprite[]{roughWall(r, 0x22405e, 0x3e6488, 0x182c44)};
+        Sprite bw = planksMacro(r, 0x3a3026, 0x4e4234, 0x5e5040, 0x2a2018);
+        Sprite bw2 = new Sprite(16, 16);
+        for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++) bw2.p[x + y * 16] = bw.p[y + x * 16];
+        Tiles.wallTex[Tiles.W_BOREAL] = new Sprite[]{bw2};
+
+        Tiles.caveBack[4] = Tiles.caveBack[1].recolor();
+        for (int i = 0; i < 64 * 64; i++)
+            Tiles.caveBack[4].p[i] = 0xff000000 | Pal.mul(Tiles.caveBack[1].p[i], 200, 236, 256);
     }
 
     // ---- version 0.3: biomes and furniture ------------------------------------

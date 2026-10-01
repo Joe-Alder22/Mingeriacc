@@ -35,21 +35,31 @@ final class Items {
             SHADOW_MAIL = 113, SHADOW_GREAVES = 114, MOLTEN_HELMET = 115, MOLTEN_MAIL = 116,
             MOLTEN_GREAVES = 117, MINING_HELMET = 118, HERMES_BOOTS = 119, CLOUD_BOTTLE = 120,
             BAND_REGEN = 121, HORSESHOE = 122, AGLET = 123, BALLOON = 124, ANKLET = 125, OBSIDIAN_SKULL = 126,
-            FLIPPER = 127, MAHOGANY_WALL = 128, OBSIDIAN_BRICK_WALL = 129, HELLSTONE_BRICK_WALL = 130;
-    static final int COUNT = 131;
+            FLIPPER = 127, MAHOGANY_WALL = 128, OBSIDIAN_BRICK_WALL = 129, HELLSTONE_BRICK_WALL = 130,
+            RUBY = 131, SAPPHIRE = 132, EMERALD = 133, TOPAZ = 134,
+            FLAME_STAFF = 135, TIDE_STAFF = 136, QUAKE_STAFF = 137, STORM_STAFF = 138,
+            FALLEN_STAR = 139, MANA_CRYSTAL = 140, MANA_POTION = 141, BAND_STARPOWER = 142, ARCANE_HAT = 143,
+            MAGIC_MIRROR = 144, SUSPICIOUS_EYE = 145, UNHOLY_ARROW = 146, EYE_SHIELD = 147,
+            SNOW_BLOCK = 148, ICE_BLOCK = 149, BOREAL_WOOD = 150, BOREAL_WALL = 151, ICE_BLADE = 152,
+            ICE_SKATES = 153, BLIZZARD_BOTTLE = 154, ICE_CHEST = 155,
+            GRASS_SEEDS = 156, JUNGLE_SEEDS = 157, PURIFICATION_POWDER = 158, HEART = 159, MANA_STAR = 160;
+    static final int COUNT = 161;
 
     // Item kinds
     static final int K_MATERIAL = 0, K_TILE = 1, K_WALL = 2, K_TOOL = 3, K_WEAPON = 4, K_AMMO = 5,
-            K_CONSUMABLE = 6, K_COIN = 7, K_ARMOR = 8, K_ACCESSORY = 9, K_BUCKET = 10;
+            K_CONSUMABLE = 6, K_COIN = 7, K_ARMOR = 8, K_ACCESSORY = 9, K_BUCKET = 10,
+            K_SEED = 11,  // turns the aimed tile into PLACE (grass seeds)
+            K_USE = 12,   // special use (mirror, summoning, powder): Game.useSpecial
+            K_PICKUP = 13; // used up at once when picked up (hearts, mana stars)
 
     // Armour slots
     static final int HEAD = 0, BODY = 1, LEGS = 2;
 
     // Weapon effects on hit
-    static final int FX_NONE = 0, FX_FIRE = 1, FX_POISON = 2;
+    static final int FX_NONE = 0, FX_FIRE = 1, FX_POISON = 2, FX_FROST = 3;
 
     // Use styles
-    static final int S_SWING = 0, S_STAB = 1, S_SHOOT = 2, S_EAT = 3, S_HOLDUP = 4;
+    static final int S_SWING = 0, S_STAB = 1, S_SHOOT = 2, S_EAT = 3, S_HOLDUP = 4, S_CAST = 5;
 
     // Ammo classes
     static final int A_NONE = 0, A_ARROW = 1;
@@ -76,6 +86,8 @@ final class Items {
     static final int[] SLOT = new int[COUNT];      // armour slot
     static final int[] DEFENSE = new int[COUNT];
     static final int[] EFFECT = new int[COUNT];    // debuff a weapon or ammo inflicts
+    static final int[] MANA = new int[COUNT];      // mana a magic weapon uses
+    static final int[] PIERCE = new int[COUNT];    // enemies an ammo's projectile passes through
     static final int[][] ARMOR_RAMP = new int[COUNT][]; // armour colours for drawing
     static final Sprite[] ICON = new Sprite[COUNT];
     static final Sprite[] SMALL = new Sprite[COUNT]; // item lying on the ground
@@ -117,6 +129,20 @@ final class Items {
         CRIT[id] = 4;
         USE_AMMO[id] = A_ARROW;
         SHOOT_SPEED[id] = speed;
+    }
+
+    /** A magic staff: held towards the mouse, uses mana. proj 0 = lightning (Magic.lightning). */
+    private static void staff(int id, String name, String desc, int damage, int mana, int useTime, double speed,
+                              int proj, int value, int rarity) {
+        def(id, name, desc, K_WEAPON, 1, 0, useTime, value);
+        STYLE[id] = S_CAST;
+        DAMAGE[id] = damage;
+        MANA[id] = mana;
+        KNOCK[id] = 3;
+        CRIT[id] = 4;
+        SHOOT_SPEED[id] = speed;
+        PROJ[id] = proj;
+        RARITY[id] = rarity;
     }
 
     private static void armor(int first, String metal, int[] ramp, int def0, int def1, int def2, int value, int rarity) {
@@ -297,8 +323,83 @@ final class Items {
         for (int id : new int[]{COPPER_BAR, IRON_BAR, SILVER_BAR, GOLD_BAR, IRON_ANVIL, FURNACE}) RARITY[id] = 0;
         for (int id : new int[]{GOLD_SWORD, GOLD_BOW, GOLD_PICK, GOLD_AXE, GOLD_HAMMER, SILVER_SWORD, SILVER_BOW})
             RARITY[id] = 1;
+        defineV4();
 
         ItemArt.build();
+    }
+
+    /** Items of version 0.4: gems, magic, the first boss, snow and the dryad's goods. */
+    private static void defineV4() {
+        String[] gems = {"Ruby", "Sapphire", "Emerald", "Topaz"};
+        String[] gemUse = {"Fire", "Water", "Earth", "Lightning"};
+        for (int k = 0; k < 4; k++) {
+            def(RUBY + k, gems[k], "A precious gem. Holds the power of " + gemUse[k].toLowerCase(), K_MATERIAL, 99, 0, 0, 1500);
+            RARITY[RUBY + k] = 1;
+        }
+        staff(FLAME_STAFF, "Flame Staff", "Shoots a bolt of fire that burns enemies", 11, 4, 24, 4.2,
+                Projectile.FLAME_BOLT, 4000, 1);
+        EFFECT[FLAME_STAFF] = FX_FIRE;
+        staff(TIDE_STAFF, "Tide Staff", "Shoots a water bolt that bounces off walls", 15, 6, 22, 3.6,
+                Projectile.WATER_BOLT, 7000, 1);
+        staff(QUAKE_STAFF, "Quake Staff", "Hurls a boulder that shatters into shards", 24, 9, 30, 4.0,
+                Projectile.ROCK, 11000, 2);
+        KNOCK[QUAKE_STAFF] = 6;
+        staff(STORM_STAFF, "Storm Staff", "Lightning strikes the enemy nearest the mouse and jumps on", 21, 10, 28, 0,
+                0, 16000, 2);
+        def(FALLEN_STAR, "Fallen Star", "Fades away at sunrise. Five make a mana crystal", K_MATERIAL, 99, 0, 0, 500);
+        def(MANA_CRYSTAL, "Mana Crystal", "Permanently increases maximum mana by 20", K_CONSUMABLE, 99, 0, 30, 2500);
+        STYLE[MANA_CRYSTAL] = S_HOLDUP;
+        RARITY[MANA_CRYSTAL] = 2;
+        def(MANA_POTION, "Lesser Mana Potion", "Restores 50 mana. Drunk by itself when you run out", K_CONSUMABLE,
+                30, 0, 17, 250);
+        STYLE[MANA_POTION] = S_EAT;
+        accessory(BAND_STARPOWER, "Band of Starpower", "Increases maximum mana by 20", 15000);
+        def(ARCANE_HAT, "Arcane Hat", "10% more magic damage, 20 more maximum mana", K_ARMOR, 1, 0, 0, 20000);
+        SLOT[ARCANE_HAT] = HEAD;
+        DEFENSE[ARCANE_HAT] = 2;
+        ARMOR_RAMP[ARCANE_HAT] = ItemArt.ARCANE;
+        RARITY[ARCANE_HAT] = 1;
+        def(MAGIC_MIRROR, "Magic Mirror", "Gaze into the mirror to return home", K_USE, 1, 0, 60, 30000);
+        STYLE[MAGIC_MIRROR] = S_HOLDUP;
+        RARITY[MAGIC_MIRROR] = 1;
+        def(SUSPICIOUS_EYE, "Suspicious Looking Eye", "Summons the Eye of Cthulhu. Works only at night", K_USE, 20, 0,
+                45, 0);
+        STYLE[SUSPICIOUS_EYE] = S_HOLDUP;
+        RARITY[SUSPICIOUS_EYE] = 1;
+        def(UNHOLY_ARROW, "Unholy Arrow", "Pierces through enemies", K_AMMO, 999, 0, 0, 40);
+        AMMO[UNHOLY_ARROW] = A_ARROW;
+        DAMAGE[UNHOLY_ARROW] = 8;
+        PROJ[UNHOLY_ARROW] = Projectile.UNHOLY_ARROW;
+        SHOOT_SPEED[UNHOLY_ARROW] = 1.7;
+        PIERCE[UNHOLY_ARROW] = 3;
+        RARITY[UNHOLY_ARROW] = 1;
+        accessory(EYE_SHIELD, "Shield of the Eye", "Double tap left or right to dash into enemies. +2 defense", 20000);
+        DEFENSE[EYE_SHIELD] = 2;
+        RARITY[EYE_SHIELD] = 3;
+
+        def(SNOW_BLOCK, "Snow Block", "Can be placed", K_TILE, 999, Tiles.SNOW, 8, 0);
+        def(ICE_BLOCK, "Ice Block", "Can be placed. Slippery", K_TILE, 999, Tiles.ICE, 8, 0);
+        def(BOREAL_WOOD, "Boreal Wood", "Snowy wood. Works as wood in recipes", K_TILE, 999, Tiles.BOREAL_PLANKS, 8, 0);
+        def(BOREAL_WALL, "Boreal Wood Wall", "Background wall", K_WALL, 999, Tiles.W_BOREAL, 7, 0);
+        sword(ICE_BLADE, "Ice Blade", 17, 4.5, 22, 10000);
+        DESC[ICE_BLADE] = "Shoots an icy bolt that chills enemies";
+        EFFECT[ICE_BLADE] = FX_FROST;
+        PROJ[ICE_BLADE] = Projectile.FROST_BOLT;
+        SHOOT_SPEED[ICE_BLADE] = 3.8;
+        RARITY[ICE_BLADE] = 1;
+        accessory(ICE_SKATES, "Ice Skates", "Grip and speed on ice", 5000);
+        accessory(BLIZZARD_BOTTLE, "Blizzard in a Bottle", "Allows a strong double jump", 6000);
+        def(ICE_CHEST, "Frozen Chest", "Stores items. Right-click to open", K_TILE, 99, Tiles.ICE_CHEST, 14, 5000);
+        def(GRASS_SEEDS, "Grass Seeds", "Plant on dirt to grow grass", K_SEED, 99, Tiles.GRASS, 15, 20);
+        def(JUNGLE_SEEDS, "Jungle Grass Seeds", "Plant on mud to grow jungle grass", K_SEED, 99, Tiles.JUNGLE_GRASS, 15, 150);
+        def(PURIFICATION_POWDER, "Purification Powder", "Cleanses the corruption around the mouse", K_USE, 99, 0, 20, 75);
+        STYLE[PURIFICATION_POWDER] = S_HOLDUP;
+        def(HEART, "Heart", "Heals 20 life", K_PICKUP, 1, 0, 0, 0);
+        def(MANA_STAR, "Star", "Restores 50 mana", K_PICKUP, 1, 0, 0, 0);
+    }
+
+    static boolean isMagic(int id) {
+        return MANA[id] > 0;
     }
 
     static boolean isTool(int id) {
@@ -314,7 +415,7 @@ final class Items {
     }
 
     static boolean isWood(int id) {
-        return id == WOOD || id == MAHOGANY || id == EBONWOOD;
+        return id == WOOD || id == MAHOGANY || id == EBONWOOD || id == BOREAL_WOOD;
     }
 
     /** Sell price in copper coins. */

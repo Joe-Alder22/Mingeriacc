@@ -18,13 +18,20 @@ final class Humanoid {
         boolean skeleton;
         /** Armour colour ramps (outline, dark, mid, light, highlight) or null. */
         int[] helm, body, legs;
+        /** Head gear drawn as a pointy hat (in the helm colours) instead of a helmet. */
+        boolean pointyHat;
 
         Look copy() {
             Look l = new Look();
-            l.skin = skin; l.skinD = skinD; l.hair = hair; l.hairD = hairD; l.eye = eye; l.sclera = sclera;
-            l.shirt = shirt; l.shirtD = shirtD; l.pants = pants; l.pantsD = pantsD; l.shoes = shoes;
-            l.hairStyle = hairStyle; l.skeleton = skeleton; l.helm = helm; l.body = body; l.legs = legs;
+            l.assign(this);
             return l;
+        }
+
+        /** Takes over the colours and style of another look (not the armour). */
+        void assign(Look o) {
+            skin = o.skin; skinD = o.skinD; hair = o.hair; hairD = o.hairD; eye = o.eye; sclera = o.sclera;
+            shirt = o.shirt; shirtD = o.shirtD; pants = o.pants; pantsD = o.pantsD; shoes = o.shoes;
+            hairStyle = o.hairStyle; skeleton = o.skeleton;
         }
     }
 
@@ -141,7 +148,7 @@ final class Humanoid {
             px(2, 5, L.skinD);
         }
         int[] hm = L.helm;
-        if (hm != null) {
+        if (hm != null && !L.pointyHat) {
             rectM(-3, 0, 6, 3, hm[2]);
             rectM(-4, 1, 1, 4, hm[1]);
             rectM(-3, 0, 6, 1, hm[3]);
@@ -149,35 +156,51 @@ final class Humanoid {
             rectM(-3, 3, 6, 1, hm[1]);
             rectM(2, 1, 1, 2, hm[1]);
         } else {
-            switch (L.hairStyle) {
-                case HAIR_SHORT:
-                    rectM(-3, 0, 6, 2, L.hair);
-                    rectM(-4, 1, 2, 4, L.hair);
-                    rectM(-2, 0, 3, 1, Pal.lerp(L.hair, 0xffffff, 0.2));
-                    rectM(1, 2, 1, 1, L.hairD);
-                    break;
-                case HAIR_LONG:
-                    rectM(-3, 0, 6, 2, L.hair);
-                    rectM(-4, 1, 2, 7, L.hair);
-                    rectM(-3, 6, 1, 3, L.hairD);
-                    rectM(-2, 0, 3, 1, Pal.lerp(L.hair, 0xffffff, 0.2));
-                    break;
-                case HAIR_BEARD:
-                    rectM(-3, 0, 6, 1, L.hair);
-                    rectM(-4, 1, 2, 3, L.hair);
-                    rectM(-1, 5, 4, 2, L.hair);
-                    rectM(0, 7, 2, 1, L.hairD);
-                    break;
-                case HAIR_SPIKY:
-                    rectM(-3, 0, 6, 1, L.hair);
-                    rectM(-4, 1, 2, 3, L.hair);
-                    px(-2, -1, L.hair);
-                    px(0, -1, L.hair);
-                    px(2, 0, L.hairD);
-                    break;
-                default:
-                    break;
+            drawHair(L);
+            if (hm != null) {
+                // pointy hat with a golden band, the tip bending backwards
+                rectM(-5, 1, 9, 1, hm[1]);
+                rectM(-4, 0, 7, 1, 0xe8c030);
+                rectM(-3, -1, 6, 1, hm[2]);
+                rectM(-3, -2, 5, 1, hm[2]);
+                rectM(-2, -2, 2, 1, hm[3]);
+                rectM(-3, -3, 4, 1, hm[2]);
+                rectM(-3, -4, 3, 1, hm[3]);
+                rectM(-4, -5, 2, 1, hm[2]);
+                px(-5, -6, hm[1]);
             }
+        }
+    }
+
+    private static void drawHair(Look L) {
+        switch (L.hairStyle) {
+            case HAIR_SHORT:
+                rectM(-3, 0, 6, 2, L.hair);
+                rectM(-4, 1, 2, 4, L.hair);
+                rectM(-2, 0, 3, 1, Pal.lerp(L.hair, 0xffffff, 0.2));
+                rectM(1, 2, 1, 1, L.hairD);
+                break;
+            case HAIR_LONG:
+                rectM(-3, 0, 6, 2, L.hair);
+                rectM(-4, 1, 2, 7, L.hair);
+                rectM(-3, 6, 1, 3, L.hairD);
+                rectM(-2, 0, 3, 1, Pal.lerp(L.hair, 0xffffff, 0.2));
+                break;
+            case HAIR_BEARD:
+                rectM(-3, 0, 6, 1, L.hair);
+                rectM(-4, 1, 2, 3, L.hair);
+                rectM(-1, 5, 4, 2, L.hair);
+                rectM(0, 7, 2, 1, L.hairD);
+                break;
+            case HAIR_SPIKY:
+                rectM(-3, 0, 6, 1, L.hair);
+                rectM(-4, 1, 2, 3, L.hair);
+                px(-2, -1, L.hair);
+                px(0, -1, L.hair);
+                px(2, 0, L.hairD);
+                break;
+            default:
+                break;
         }
     }
 

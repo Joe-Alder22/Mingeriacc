@@ -16,8 +16,10 @@ final class Audio implements Runnable {
             TICK = 7, CRAFT = 8, SWING = 9, TREE = 10, CHOP = 11, OPEN = 12, GRASS = 13, MENU = 14,
             HURT = 15, DEATH = 16, SQUISH = 17, SLIME_DIE = 18, BONE = 19, HIT = 20, KILL = 21, ARROW_HIT = 22,
             BOW = 23, COIN = 24, HEAL = 25, CRYSTAL = 26, ZOMBIE = 27, GLASS = 28, METAL = 29, POT = 30,
-            HISS = 31, SPLASH = 32, DOOR = 33, CHEST = 34, SPELL = 35;
-    private static final int SFX_COUNT = 36;
+            HISS = 31, SPLASH = 32, DOOR = 33, CHEST = 34, SPELL = 35, ROAR = 36, THUNDER = 37, STAR = 38,
+            ZAP = 39, FREEZE = 40, MIRROR = 41, SQUEAK = 42, BUZZ = 43, GROWL = 44, SQUELCH = 45, OOF = 46,
+            RATTLE = 47, BLUB = 48, SQUAWK = 49;
+    private static final int SFX_COUNT = 50;
 
     private static final class Voice {
         float[] data;
@@ -372,6 +374,55 @@ final class Audio implements Runnable {
         sfx[CHEST] = mix(env(voice(0.15, 320, 220, 900, 1800, 0.08), 0.01, 0.05, 0.7),
                 env(bandpass(noise(0.06), 600, 4), 0.001, 0.02, 4.0));
         sfx[SPELL] = mix(env(fm(0.4, 660, 1.5, 3.0, 0.15), 0.01, 0.12, 0.3), env(bandpass(noise(0.3), 1500, 2), 0.02, 0.1, 0.6));
+        // version 0.4
+        sfx[ROAR] = mix(env(voice(1.4, 125, 52, 360, 720, 0.14), 0.08, 0.55, 0.9),
+                env(crackle(lowpass(noise(1.3), 320), 0.02), 0.12, 0.45, 0.9), env(sine(1.1, 72, 38), 0.05, 0.45, 0.6));
+        sfx[THUNDER] = mix(env(highpass(noise(0.12), 2200), 0.0005, 0.025, 0.9),
+                env(crackle(lowpass(noise(1.5), 420), 0.03), 0.01, 0.45, 1.0), env(sine(0.9, 62, 30), 0.004, 0.3, 0.45));
+        sfx[STAR] = seq(0.05, env(fm(0.5, 2637, 3.5, 0.6, 0.1), 0.001, 0.15, 0.18),
+                env(fm(0.5, 3136, 3.5, 0.6, 0.1), 0.001, 0.15, 0.18), env(fm(0.7, 3951, 3.5, 0.6, 0.1), 0.001, 0.25, 0.18));
+        sfx[ZAP] = mix(env(sine(0.18, 480, 1500), 0.003, 0.06, 0.3), env(fm(0.2, 900, 2.0, 2.0, 0.05), 0.002, 0.05, 0.15),
+                env(bandpass(noise(0.2), 2600, 1.5), 0.01, 0.06, 0.6));
+        float[] ice = new float[1];
+        for (int k = 0; k < 6; k++) {
+            double f = 3000 + rnd.nextDouble() * 3500;
+            ice = mix(ice, seq(0.018 * k, new float[1], env(sine(0.15, f, f * 1.01), 0.0005, 0.03, 0.1)));
+        }
+        sfx[FREEZE] = mix(ice, env(crackle(highpass(noise(0.25), 3000), 0.006), 0.002, 0.06, 0.7));
+        sfx[MIRROR] = mix(seq(0.07, env(fm(0.6, 1047, 3.5, 0.5, 0.1), 0.002, 0.2, 0.16), env(fm(0.6, 1319, 3.5, 0.5, 0.1), 0.002, 0.2, 0.16),
+                env(fm(0.6, 1568, 3.5, 0.5, 0.1), 0.002, 0.2, 0.16), env(fm(0.8, 2093, 3.5, 0.5, 0.1), 0.002, 0.3, 0.16)),
+                env(bandpass(noise(0.6), 3000, 1.0), 0.15, 0.2, 0.35));
+        creatureSounds();
+    }
+
+    /** Voices of the creatures: hurt sounds and the odd noise they make now and then. */
+    private void creatureSounds() {
+        float[] chirp = buf(0.07);
+        double ph = 0;
+        for (int i = 0; i < chirp.length; i++) {
+            double t = i / (double) chirp.length;
+            ph += (2600 + 1500 * Math.sin(Math.PI * t)) / RATE;
+            chirp[i] = (float) Math.sin(2 * Math.PI * ph);
+        }
+        sfx[SQUEAK] = seq(0.055, env(chirp.clone(), 0.002, 0.025, 0.3), env(chirp, 0.002, 0.02, 0.22));
+        float[] bz = buf(0.35);
+        ph = 0;
+        for (int i = 0; i < bz.length; i++) {
+            double t = i / (double) RATE;
+            ph = (ph + (160 + 12 * Math.sin(t * 9)) / RATE) % 1.0;
+            bz[i] = (float) ((ph * 2 - 1) * (0.65 + 0.35 * Math.sin(2 * Math.PI * 31 * t)));
+        }
+        sfx[BUZZ] = env(bandpass(bz, 950, 1.6), 0.03, 0.15, 0.9);
+        sfx[GROWL] = mix(env(voice(0.7, 92, 62, 330, 680, 0.2), 0.05, 0.28, 0.75),
+                env(crackle(lowpass(noise(0.6), 500), 0.025), 0.05, 0.2, 0.5));
+        sfx[SQUELCH] = mix(env(lowpass(crackle(noise(0.18), 0.007), 1300), 0.002, 0.05, 1.3),
+                env(sine(0.14, 270, 110), 0.002, 0.045, 0.5));
+        sfx[OOF] = env(voice(0.17, 235, 165, 760, 1350, 0.02), 0.004, 0.06, 0.75);
+        sfx[RATTLE] = seq(0.05, env(bandpass(noise(0.03), 1500, 8), 0.0005, 0.01, 3.0),
+                env(bandpass(noise(0.03), 1100, 8), 0.0005, 0.01, 2.6), env(bandpass(noise(0.03), 1700, 8), 0.0005, 0.01, 2.4),
+                env(bandpass(noise(0.03), 1250, 8), 0.0005, 0.012, 2.0));
+        sfx[BLUB] = mix(env(sine(0.12, 430, 170), 0.003, 0.04, 0.4), env(lowpass(noise(0.05), 700), 0.002, 0.015, 0.25));
+        sfx[SQUAWK] = env(voice(0.2, 540, 390, 950, 1900, 0.06), 0.006, 0.07, 0.55);
     }
 
     // ---- tests --------------------------------------------------------------
